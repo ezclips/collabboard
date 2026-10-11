@@ -238,6 +238,7 @@ describe('PATCH-187 — AI credits', () => {
       text_action: 1,
       table_fill: 1,
       table_plan: 1,
+      notes_to_cards: 1,
       transcript_punctuate: 1,
       component: 1,
     });

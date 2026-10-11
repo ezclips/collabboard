@@ -106,6 +106,8 @@ import {
 import { requestKnowledgePdfAreaImage, type KnowledgePdfAreaImageDraft } from '@/lib/infra/knowledge/knowledgePdfAreaImageClient';
 import { createKeyedDebounce } from '@/lib/infra/keyedDebounce';
 import {
+  buildNoteCardLinks,
+  insertKanbanCards,
   loadBoardFirstSwimlane,
   loadKanbanLinkStatuses,
   sendNotesToKanban,
@@ -7037,39 +7039,70 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     const batch = sendToKanban;
     if (!batch || batch.notes.length === 0) return;
     if (!canEditBoardContentRef.current) return;
-    const chosen = batch.notes.filter((note) => selection.noteIds.includes(note.id));
-    if (chosen.length === 0) return;
     const userId = user?.id ?? null;
     if (!userId) {
       toast.error('Sign in to send notes to a board.');
       return;
     }
+
     const swimlaneId = selection.swimlaneId ?? await loadBoardFirstSwimlane(selection.boardId);
-    const result = await sendNotesToKanban({
-      boardId: selection.boardId,
-      columnId: selection.columnId,
-      swimlaneId,
-      notes: chosen,
-      userId,
-    });
+
+    // One insert path for both modes. AI mode inserts the ticked suggestions and
+    // links every source note to the created card (first card wins); notes mode
+    // inserts one card per ticked note and links it.
+    let created: Array<{ noteId: string; cardId: string }> = [];
+    let total = 0;
+    let failed = 0;
+
+    if (selection.mode === 'ai') {
+      const cards = selection.cards ?? [];
+      if (cards.length === 0) return;
+      const result = await insertKanbanCards({
+        boardId: selection.boardId,
+        columnId: selection.columnId,
+        swimlaneId,
+        userId,
+        cards: cards.map((card) => ({
+          title: card.title,
+          content: card.description,
+          sourceNoteIds: card.sourceNoteIds,
+        })),
+      });
+      created = Array.from(buildNoteCardLinks(result.created), ([noteId, cardId]) => ({ noteId, cardId }));
+      total = result.total;
+      failed = result.failed;
+    } else {
+      const chosen = batch.notes.filter((note) => selection.noteIds.includes(note.id));
+      if (chosen.length === 0) return;
+      const result = await sendNotesToKanban({
+        boardId: selection.boardId,
+        columnId: selection.columnId,
+        swimlaneId,
+        notes: chosen,
+        userId,
+      });
+      created = result.created;
+      total = result.total;
+      failed = result.failed;
+    }
 
     // PATCH-337 immediate save: link ONLY the notes whose card actually exists.
-    for (const { noteId, cardId } of result.created) {
+    for (const { noteId, cardId } of created) {
       await updatePadletMetadataNow(noteId, { kanbanLink: { boardId: selection.boardId, cardId } });
     }
 
     setSendToKanban(null);
 
-    if (result.created.length === 0) {
+    if (created.length === 0) {
       toast.error('No cards could be created.');
       return;
     }
     toast.success(
-      `${result.created.length} ${result.created.length === 1 ? 'card' : 'cards'} added to ${selection.boardTitle}`,
+      `${created.length} ${created.length === 1 ? 'card' : 'cards'} added to ${selection.boardTitle}`,
       { action: { label: 'Open board', onClick: () => router.push(`/dashboard/canvas/${selection.boardId}`) } },
     );
-    if (result.failed > 0) {
-      toast.error(`${result.created.length} of ${result.total} cards created`);
+    if (failed > 0) {
+      toast.error(`${created.length} of ${total} cards created`);
     }
   }, [sendToKanban, user, updatePadletMetadataNow, router]);
 
@@ -11070,6 +11103,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                 preselectedIds={sendToKanban.preselectedIds}
                 linkedCount={sendToKanban.skippedLinked}
                 userId={user?.id ?? null}
+                sourceBoardId={canvasId ?? ''}
                 onConfirm={confirmSendToKanban}
               />
             )}

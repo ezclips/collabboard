@@ -2,7 +2,7 @@
 // hand-rolled chainable fake so no Supabase client is constructed.
 import { describe, expect, it } from 'vitest';
 import type { Padlet } from '@/types/collabboard';
-import { loadKanbanLinkStatuses, sendNotesToKanban } from '@/lib/kanban/sendNotesToKanban';
+import { buildNoteCardLinks, loadKanbanLinkStatuses, sendNotesToKanban } from '@/lib/kanban/sendNotesToKanban';
 
 type Resolver = (args: { table: string; payload?: unknown; method: string }) => unknown;
 
@@ -81,6 +81,19 @@ describe('PATCH-340 sendNotesToKanban', () => {
 
     expect(result.created.map((c) => c.noteId)).toEqual(['n1']);
     expect(result.failed).toBe(1);
+  });
+});
+
+describe('PATCH-342 buildNoteCardLinks', () => {
+  it('links every source note, first card wins, unused notes stay unlinked', () => {
+    const links = buildNoteCardLinks([
+      { cardId: 'card-1', sourceNoteIds: ['n1', 'n2'] },
+      { cardId: 'card-2', sourceNoteIds: ['n2', 'n3'] },
+    ]);
+    expect(links.get('n1')).toBe('card-1');
+    expect(links.get('n2')).toBe('card-1'); // first card that used it
+    expect(links.get('n3')).toBe('card-2');
+    expect(links.has('n4')).toBe(false);
   });
 });
 

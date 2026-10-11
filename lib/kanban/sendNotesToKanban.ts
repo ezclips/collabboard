@@ -112,24 +112,38 @@ export async function loadBoardFirstSwimlane(
   return (data[0] as { id?: string }).id ?? null;
 }
 
+/** One card to insert, and the note(s) it came from. */
+export interface KanbanCardDraft {
+  title: string;
+  content: string;
+  /** PATCH-340: one note. PATCH-342: one or more (merged notes). */
+  sourceNoteIds: string[];
+}
+
+export interface InsertKanbanCardsResult {
+  total: number;
+  created: Array<{ cardId: string; sourceNoteIds: string[] }>;
+  failed: number;
+}
+
 /**
- * Insert one card per note (in reading order) at the end of `columnId`, then
- * report exactly which notes got a card. The whole batch is attempted first;
- * if that statement is refused, each row is retried alone so one rejected row
- * cannot lose the rest -- and the caller learns the honest created/failed split.
+ * Insert card rows at the end of `columnId`, then report exactly which were
+ * created. The whole batch is attempted first; if that statement is refused,
+ * each row is retried alone so one rejected row cannot lose the rest -- and the
+ * caller learns the honest created/failed split. Shared by "One card per note"
+ * and the AI suggestions: ONE insert path.
  */
-export async function sendNotesToKanban(
+export async function insertKanbanCards(
   params: {
     boardId: string;
     columnId: string;
     swimlaneId: string | null;
-    notes: Padlet[];
     userId: string;
+    cards: KanbanCardDraft[];
   },
   client: KanbanClient = supabaseBrowser(),
-): Promise<SendNotesResult> {
-  const ordered = sortNotesForSend(params.notes);
-  const total = ordered.length;
+): Promise<InsertKanbanCardsResult> {
+  const total = params.cards.length;
   if (total === 0) return { total: 0, created: [], failed: 0 };
 
   const { data: existing } = await client
@@ -144,24 +158,21 @@ export async function sendNotesToKanban(
   }
 
   const nowIso = new Date().toISOString();
-  const rows = ordered.map((note, index) => {
-    const card = noteToKanbanCard(note);
-    return {
-      id: crypto.randomUUID(),
-      canvas_id: params.boardId,
-      column_id: params.columnId,
-      swimlane_id: params.swimlaneId,
-      title: card.title,
-      content: card.content,
-      order_index: nextOrder + index,
-      creator_id: params.userId,
-      created_at: nowIso,
-      updated_at: nowIso,
-      noteId: note.id,
-    };
-  });
+  const rows = params.cards.map((card, index) => ({
+    id: crypto.randomUUID(),
+    canvas_id: params.boardId,
+    column_id: params.columnId,
+    swimlane_id: params.swimlaneId,
+    title: card.title,
+    content: card.content,
+    order_index: nextOrder + index,
+    creator_id: params.userId,
+    created_at: nowIso,
+    updated_at: nowIso,
+    sourceNoteIds: card.sourceNoteIds,
+  }));
 
-  const insertPayload = rows.map(({ noteId: _noteId, ...row }) => row);
+  const insertPayload = rows.map(({ sourceNoteIds: _sourceNoteIds, ...row }) => row);
   const createdIds = new Set<string>();
 
   const batch = await client.from('kanban_cards').insert(insertPayload).select('id');
@@ -177,8 +188,60 @@ export async function sendNotesToKanban(
 
   const created = rows
     .filter((row) => createdIds.has(row.id))
-    .map((row) => ({ noteId: row.noteId, cardId: row.id }));
+    .map((row) => ({ cardId: row.id, sourceNoteIds: row.sourceNoteIds }));
   return { total, created, failed: total - created.length };
+}
+
+/**
+ * Insert one card per note (in reading order) at the end of `columnId`, then
+ * report exactly which notes got a card.
+ */
+export async function sendNotesToKanban(
+  params: {
+    boardId: string;
+    columnId: string;
+    swimlaneId: string | null;
+    notes: Padlet[];
+    userId: string;
+  },
+  client: KanbanClient = supabaseBrowser(),
+): Promise<SendNotesResult> {
+  const ordered = sortNotesForSend(params.notes);
+  const result = await insertKanbanCards(
+    {
+      boardId: params.boardId,
+      columnId: params.columnId,
+      swimlaneId: params.swimlaneId,
+      userId: params.userId,
+      cards: ordered.map((note) => {
+        const card = noteToKanbanCard(note);
+        return { title: card.title, content: card.content, sourceNoteIds: [note.id] };
+      }),
+    },
+    client,
+  );
+  return {
+    total: result.total,
+    created: result.created.map((entry) => ({ noteId: entry.sourceNoteIds[0], cardId: entry.cardId })),
+    failed: result.failed,
+  };
+}
+
+/**
+ * PATCH-342. noteId -> cardId, for linking the notes a created card came from.
+ * A note that is the source of several created cards links to the FIRST one;
+ * notes no created card used are absent (stay unlinked).
+ */
+export function buildNoteCardLinks(
+  created: Array<{ cardId: string; sourceNoteIds: string[] }>,
+): Map<string, string> {
+  const links = new Map<string, string>();
+  for (const { cardId, sourceNoteIds } of created) {
+    for (const noteId of sourceNoteIds) {
+      if (!links.has(noteId)) links.set(noteId, cardId);
+    }
+  }
+  return links;
 }
 
 /**

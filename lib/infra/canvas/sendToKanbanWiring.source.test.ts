@@ -17,8 +17,14 @@ const SHELL = read('components/collabboard/canvas/ui/KanbanShell.tsx');
 describe('PATCH-340 CanvasClient send wiring', () => {
   it('sends the batch, then links only the notes whose card was created', () => {
     expect(CLIENT).toContain('sendNotesToKanban({');
-    expect(CLIENT).toContain('for (const { noteId, cardId } of result.created) {');
+    expect(CLIENT).toContain('for (const { noteId, cardId } of created) {');
     expect(CLIENT).toContain('updatePadletMetadataNow(noteId, { kanbanLink: { boardId: selection.boardId, cardId } });');
+  });
+
+  it('PATCH-342: AI mode inserts via the shared helper and links every source note', () => {
+    expect(CLIENT).toContain('insertKanbanCards({');
+    expect(CLIENT).toContain('buildNoteCardLinks(result.created)');
+    expect(CLIENT).toContain("selection.mode === 'ai'");
   });
 
   it('reports success with an Open board action, and partial failure honestly', () => {
