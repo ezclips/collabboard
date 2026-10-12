@@ -32,7 +32,24 @@ function browserStorage(): CreditWarningStorage | null {
   }
 }
 
-export function AiCreditBar({ data }: { data: BoardAiCredits | null }) {
+export interface ConversationTokens {
+  input: number;
+  output: number;
+  total: number;
+}
+
+export function AiCreditBar({
+  data,
+  conversationTokens = null,
+}: {
+  data: BoardAiCredits | null;
+  /**
+   * PATCH-345. The current conversation's token totals, or null when there are
+   * no counted messages yet. Only the own-key line uses it; credit states are
+   * unchanged.
+   */
+  conversationTokens?: ConversationTokens | null;
+}) {
   // Defined at render time so the module has no top-level JSX (the test's
   // classic JSX transform resolves React from the global at render).
   const seePlans = (
@@ -62,8 +79,17 @@ export function AiCreditBar({ data }: { data: BoardAiCredits | null }) {
 
   if (data.ownKey) {
     return (
-      <p data-ai-credit-bar="own-key" className="mb-1 text-[10px] text-gray-400">
-        Using your own AI key — no credits used
+      <p
+        data-ai-credit-bar="own-key"
+        className="mb-1 text-[10px] text-gray-400"
+        title={conversationTokens
+          ? 'Counted from what your AI provider reported. No CollabBoard credits used.'
+          : undefined}
+      >
+        {conversationTokens
+          ? `Your own AI key · this chat: ${conversationTokens.total.toLocaleString()} tokens `
+            + `(${conversationTokens.input.toLocaleString()} in · ${conversationTokens.output.toLocaleString()} out)`
+          : 'Using your own AI key — no credits used'}
       </p>
     );
   }

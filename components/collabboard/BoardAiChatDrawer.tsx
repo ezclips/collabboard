@@ -7,6 +7,7 @@ import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelCh
 import BoardAiMarkdown from '@/components/collabboard/BoardAiMarkdown';
 import { AiCreditBar } from '@/components/billing/AiCreditBar';
 import { useBoardAiCredits } from '@/lib/hooks/useBoardAiCredits';
+import { conversationTokenTotals } from '@/lib/domain/ai/conversationTokens';
 import {
   BoardAiChatDraftChips,
   BoardAiChatPersistedChips,
@@ -543,6 +544,8 @@ export default function BoardAiChatDrawer({
   // PATCH-343. The board owner's AI credit bar (wiring only). Gated on isOpen,
   // so a closed drawer -- mounted with every board -- makes no credits request.
   const credits = useBoardAiCredits(isOpen ? boardId : null);
+  // PATCH-345. The current conversation's token totals, for the own-key line.
+  const tokenTotals = conversationTokenTotals(messages);
   const error = documentScopeId ? documentSession.error : boardError;
   const errorPlansLink = documentScopeId
     ? documentSession.errorPlansLink === true
@@ -2291,8 +2294,13 @@ export default function BoardAiChatDrawer({
           ) : null}
         </div>
 
-        {/* PATCH-343. The board owner's credit bar, directly above the composer. */}
-        <AiCreditBar data={credits.data} />
+        {/* PATCH-343/345. The board owner's credit bar, directly above the composer. */}
+        <AiCreditBar
+          data={credits.data}
+          conversationTokens={tokenTotals.counted > 0
+            ? { input: tokenTotals.input, output: tokenTotals.output, total: tokenTotals.total }
+            : null}
+        />
 
         <div className="flex items-end gap-1.5">
           <textarea

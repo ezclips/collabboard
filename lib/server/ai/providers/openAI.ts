@@ -14,7 +14,8 @@ import {
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
-import type { AIGenerateTextInput, AIProviderAdapter } from './types';
+import { finiteTokenCount, reportUsage } from './usage';
+import type { AIGenerateTextInput, AIProviderAdapter, AITokenUsage } from './types';
 
 export const OPENAI_ENDPOINT = 'https://api.openai.com/v1/responses';
 
@@ -25,6 +26,19 @@ interface ResponsesPayload {
     readonly type?: unknown;
     readonly content?: readonly { readonly type?: unknown; readonly text?: unknown }[];
   }[];
+  /** PATCH-345. The Responses API reports usage here. */
+  readonly usage?: {
+    readonly input_tokens?: unknown;
+    readonly output_tokens?: unknown;
+  };
+}
+
+/** The reported usage, or null when the response carried none. */
+function responsesUsage(payload: ResponsesPayload | null): AITokenUsage | null {
+  const inputTokens = finiteTokenCount(payload?.usage?.input_tokens);
+  const outputTokens = finiteTokenCount(payload?.usage?.output_tokens);
+  if (inputTokens === null || outputTokens === null) return null;
+  return { inputTokens, outputTokens };
 }
 
 /**
@@ -116,6 +130,8 @@ export const openAIAdapter: AIProviderAdapter = {
       payload = null;
     }
 
-    return requireProviderText('openai', extractResponsesText(payload));
+    const text = requireProviderText('openai', extractResponsesText(payload));
+    reportUsage(input, responsesUsage(payload));
+    return text;
   },
 };

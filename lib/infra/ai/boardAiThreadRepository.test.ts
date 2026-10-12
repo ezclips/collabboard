@@ -31,6 +31,9 @@ interface MessageSeed {
   context: unknown;
   citations: unknown;
   created_at: string;
+  // PATCH-345. Absent when the insert omitted the columns.
+  input_tokens?: number | null;
+  output_tokens?: number | null;
 }
 
 interface FakeSupabaseError {
@@ -139,6 +142,9 @@ function fakeClient(seed: { threads?: ThreadSeed[]; messages?: MessageSeed[]; th
                 context: row.context ?? null,
                 citations: row.citations ?? null,
                 created_at: '2026-09-02T10:01:00Z',
+                // Copied only when present, exactly as the column default works.
+                ...('input_tokens' in row ? { input_tokens: row.input_tokens as number | null } : {}),
+                ...('output_tokens' in row ? { output_tokens: row.output_tokens as number | null } : {}),
               };
               messages.push(created);
               return { data: created, error: null };
@@ -264,6 +270,56 @@ describe('D/G. messages are reached only through the scoped thread', () => {
     expect(touch.filters.id).toBe(THREAD_A);
     expect(touch.filters.user_id).toBe(USER_A);
     expect(touch.filters.board_id).toBe(BOARD_1);
+  });
+
+  it('PATCH-345. stores the token counts when given and maps them back', async () => {
+    const { client, calls } = fakeClient({ threads: [ownedThread] });
+    const repo = createBoardAiThreadRepository(client);
+
+    const result = await repo.appendMessage(USER_A, BOARD_1, THREAD_A, {
+      role: 'assistant', content: 'answer', inputTokens: 120, outputTokens: 34,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.inputTokens).toBe(120);
+      expect(result.value.outputTokens).toBe(34);
+    }
+    const insert = calls.find((c) => c.op === 'insert')!;
+    expect(insert.filters.input_tokens).toBe(120);
+    expect(insert.filters.output_tokens).toBe(34);
+  });
+
+  it('PATCH-345. omits the token columns entirely when no counts are given', async () => {
+    const { client, calls } = fakeClient({ threads: [ownedThread] });
+    const repo = createBoardAiThreadRepository(client);
+
+    const result = await repo.appendMessage(USER_A, BOARD_1, THREAD_A, { role: 'user', content: 'hi' });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.inputTokens).toBeNull();
+      expect(result.value.outputTokens).toBeNull();
+    }
+    const insert = calls.find((c) => c.op === 'insert')!;
+    expect('input_tokens' in insert.filters).toBe(false);
+    expect('output_tokens' in insert.filters).toBe(false);
+  });
+
+  it('PATCH-345. listMessages maps stored counts back', async () => {
+    const { client } = fakeClient({
+      threads: [ownedThread],
+      messages: [{
+        id: 'm1', thread_id: THREAD_A, role: 'assistant', content: 'a',
+        provider: null, model: null, context: null, citations: null, created_at: 'z',
+        input_tokens: 5, output_tokens: 7,
+      }],
+    });
+    const repo = createBoardAiThreadRepository(client);
+    const result = await repo.listMessages(USER_A, BOARD_1, THREAD_A);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value[0].inputTokens).toBe(5);
+      expect(result.value[0].outputTokens).toBe(7);
+    }
   });
 
   it('refuses an invalid role or empty content without touching the database', async () => {

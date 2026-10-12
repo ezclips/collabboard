@@ -25,13 +25,16 @@ const credits = (over: Partial<BoardAiCredits['credits']> = {}, top: Partial<Boa
   ...top,
 });
 
-async function render(data: BoardAiCredits | null) {
+async function render(
+  data: BoardAiCredits | null,
+  conversationTokens: { input: number; output: number; total: number } | null = null,
+) {
   if (!root) {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
   }
-  await act(async () => { root!.render(<AiCreditBar data={data} />); });
+  await act(async () => { root!.render(<AiCreditBar data={data} conversationTokens={conversationTokens} />); });
 }
 
 const q = (selector: string) => host.querySelector(selector) as HTMLElement | null;
@@ -92,6 +95,22 @@ describe('PATCH-343 AiCreditBar', () => {
     expect(q('[data-ai-credit-bar="own-key"]')).not.toBeNull();
     expect(q('[role="meter"]')).toBeNull();
     expect(host.textContent).toContain('Using your own AI key');
+  });
+
+  it('PATCH-345 own-key with tokens: shows the per-conversation total', async () => {
+    await render(credits({}, { ownKey: true }), { input: 9820, output: 2611, total: 12431 });
+    const line = q('[data-ai-credit-bar="own-key"]')!;
+    const n = (value: number) => value.toLocaleString();
+    expect(line.textContent).toContain(
+      `Your own AI key · this chat: ${n(12431)} tokens (${n(9820)} in · ${n(2611)} out)`,
+    );
+    expect(line.getAttribute('title')).toContain('No CollabBoard credits used');
+  });
+
+  it('PATCH-345 own-key without tokens keeps the PATCH-343 line', async () => {
+    await render(credits({}, { ownKey: true }));
+    expect(q('[data-ai-credit-bar="own-key"]')?.textContent).toContain('Using your own AI key — no credits used');
+    expect(q('[data-ai-credit-bar="own-key"]')?.getAttribute('title')).toBeNull();
   });
 
   it('free: no bar, "No AI on Free" with a See plans link', async () => {

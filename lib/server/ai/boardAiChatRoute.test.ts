@@ -83,8 +83,17 @@ function repository(overrides: Record<string, unknown> = {}) {
     ])),
     appendMessage: vi.fn(async (_u: unknown, _b: unknown, _t: unknown, input: unknown) => {
       appended.push(input);
-      const typed = input as { role: string; content: string; provider?: string; model?: string };
-      return ok({ ...assistantRow, role: typed.role, content: typed.content, provider: typed.provider ?? null, model: typed.model ?? null });
+      const typed = input as { role: string; content: string; provider?: string; model?: string; inputTokens?: number; outputTokens?: number };
+      return ok({
+        ...assistantRow,
+        role: typed.role,
+        content: typed.content,
+        provider: typed.provider ?? null,
+        model: typed.model ?? null,
+        // Mirrors the real repository: absent input → null stored and read back.
+        inputTokens: typed.inputTokens ?? null,
+        outputTokens: typed.outputTokens ?? null,
+      });
     }),
     deleteThread: vi.fn(async () => ok(undefined)),
     ...overrides,
@@ -320,6 +329,53 @@ describe('16-20. persistence order and metadata', () => {
     expect(repo.listMessages).toHaveBeenCalledTimes(1);
     const turns = mocks.executeBoardAiChat.mock.calls[0][1] as { content: string }[];
     expect(turns.every((t) => ['earlier', 'hello'].includes(t.content))).toBe(true);
+  });
+});
+
+describe('PATCH-345. token usage is stored and returned', () => {
+  it('POST stores and returns the counts the run reported', async () => {
+    const repo = repository();
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'answer', provider: 'deepseek', model: 'deepseek-chat',
+      usage: { inputTokens: 120, outputTokens: 34 },
+    });
+    const response = await post({ message: 'hello' });
+
+    expect(response.status).toBe(200);
+    expect(repo.appended[1]).toMatchObject({ inputTokens: 120, outputTokens: 34 });
+    const body = await response.json();
+    expect(body.message).toMatchObject({ inputTokens: 120, outputTokens: 34 });
+  });
+
+  it('POST with no reported usage stores nothing and returns nulls', async () => {
+    const repo = repository();
+    const response = await post({ message: 'hello' });
+
+    expect((repo.appended[1] as Record<string, unknown>)).not.toHaveProperty('inputTokens');
+    expect((repo.appended[1] as Record<string, unknown>)).not.toHaveProperty('outputTokens');
+    const body = await response.json();
+    expect(body.message.inputTokens).toBeNull();
+    expect(body.message.outputTokens).toBeNull();
+  });
+
+  it('GET returns the stored counts, null for a user message', async () => {
+    repository({
+      listMessages: vi.fn(async () => ok([
+        { ...assistantRow, id: 'a1', role: 'assistant' as const, inputTokens: 12, outputTokens: 5 },
+        { ...assistantRow, id: 'u1', role: 'user' as const, content: 'hi', provider: null, model: null, inputTokens: null, outputTokens: null },
+      ])),
+    });
+    const response = await route.GET(
+      new Request(`http://localhost/api/boards/${BOARD_ID}/ai/chat?threadId=${THREAD_ID}`),
+      { params: Promise.resolve({ id: BOARD_ID }) },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const assistant = body.messages.find((m: { id: string }) => m.id === 'a1');
+    const user = body.messages.find((m: { id: string }) => m.id === 'u1');
+    expect(assistant).toMatchObject({ inputTokens: 12, outputTokens: 5 });
+    expect(user).toMatchObject({ inputTokens: null, outputTokens: null });
   });
 });
 

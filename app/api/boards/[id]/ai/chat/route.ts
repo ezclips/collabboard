@@ -574,6 +574,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       // Names only, and only on the reply that was actually generated.
       provider: result.provider,
       model: result.model,
+      // PATCH-345. What the provider reported, or omitted entirely when it
+      // reported nothing (both columns are nullable).
+      ...(result.usage ? { inputTokens: result.usage.inputTokens, outputTokens: result.usage.outputTokens } : {}),
       // Present only when the answer actually cited something: an uncited
       // reply carries no citation field at all, exactly as it carries no
       // context of its own. The proof rides inside that same envelope and is
@@ -600,6 +603,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         provider: assistant.value.provider,
         model: assistant.value.model,
         createdAt: assistant.value.createdAt,
+        // PATCH-345. Null when the provider reported no usage.
+        inputTokens: assistant.value.inputTokens,
+        outputTokens: assistant.value.outputTokens,
         // Re-derived from what was stored, through the same parser the history
         // read uses: one sanitized shape, whichever way a client got here.
         citations: boardAiCitationsFromStored(assistant.value.citations),
@@ -752,6 +758,9 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
         provider: entry.provider,
         model: entry.model,
         createdAt: entry.createdAt,
+        // PATCH-345. Null on user messages and on replies with no reported usage.
+        inputTokens: entry.inputTokens,
+        outputTokens: entry.outputTokens,
         // Re-derived from the stored JSON, never forwarded: a row a user
         // hand-wrote can hold anything, so only fields the contract defines
         // reach a browser -- and none of them is authorization.

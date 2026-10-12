@@ -12,7 +12,8 @@ import {
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
-import type { AIGenerateTextInput, AIProviderAdapter } from './types';
+import { finiteTokenCount, reportUsage } from './usage';
+import type { AIGenerateTextInput, AIProviderAdapter, AITokenUsage } from './types';
 
 export const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
 
@@ -21,6 +22,28 @@ export const ANTHROPIC_VERSION = '2023-06-01';
 
 interface MessagesPayload {
   readonly content?: readonly { readonly type?: unknown; readonly text?: unknown }[];
+  /**
+   * PATCH-345. The Messages API reports usage here. Cache reads and cache
+   * writes are input the model processed, so they count toward input tokens.
+   */
+  readonly usage?: {
+    readonly input_tokens?: unknown;
+    readonly output_tokens?: unknown;
+    readonly cache_creation_input_tokens?: unknown;
+    readonly cache_read_input_tokens?: unknown;
+  };
+}
+
+/** The reported usage, or null when the response carried none. */
+function anthropicUsage(payload: MessagesPayload | null): AITokenUsage | null {
+  const usage = payload?.usage;
+  const outputTokens = finiteTokenCount(usage?.output_tokens);
+  const baseInput = finiteTokenCount(usage?.input_tokens);
+  if (baseInput === null || outputTokens === null) return null;
+  const inputTokens = baseInput
+    + (finiteTokenCount(usage?.cache_creation_input_tokens) ?? 0)
+    + (finiteTokenCount(usage?.cache_read_input_tokens) ?? 0);
+  return { inputTokens, outputTokens };
 }
 
 /**
@@ -124,6 +147,10 @@ export const anthropicAdapter: AIProviderAdapter = {
       payload = null;
     }
 
-    return requireProviderText('anthropic', extractMessagesText(payload));
+    const text = requireProviderText('anthropic', extractMessagesText(payload));
+    // After a successful response only: a body with no text throws above and
+    // reports nothing.
+    reportUsage(input, anthropicUsage(payload));
+    return text;
   },
 };

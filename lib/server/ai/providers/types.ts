@@ -4,9 +4,11 @@
 // 'use client' module: every adapter handles a plaintext API key.
 //
 // The contract is deliberately narrow -- one call in, plain text out. No
-// streaming, no conversation state, no usage accounting, and no
-// provider-specific response object ever travels upward: an adapter returns a
-// plain string or throws a normalized AIProviderError.
+// streaming, no conversation state, and no provider-specific response object
+// ever travels upward: an adapter returns a plain string or throws a normalized
+// AIProviderError. Usage is REPORTED, never returned: an adapter that sees the
+// provider's usage calls the caller's optional `onUsage` exactly once, and
+// `generateText` still resolves to a plain string.
 //
 // It now carries OPTIONAL inline image parts alongside the user text. That is
 // the only widening: still one call, still a string back, still no SDK and no
@@ -45,6 +47,17 @@ export const AI_EXECUTION_PROVIDERS: readonly AIExecutionProvider[] = [
 export interface AIGenerateImageInput {
   readonly mediaType: string;
   readonly base64: string;
+}
+
+/**
+ * PATCH-345. What a provider reported about one call's tokens.
+ *
+ * Reported through `onUsage` and NEVER returned: `generateText` still resolves
+ * to a plain string, so no existing call site changes.
+ */
+export interface AITokenUsage {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
 }
 
 export interface AIGenerateTextInput {
@@ -86,6 +99,13 @@ export interface AIGenerateTextInput {
    * measured; the others are deliberately unchanged.
    */
   readonly reasoning?: 'off';
+  /**
+   * PATCH-345. Called AT MOST ONCE, after a SUCCESSFUL response, and ONLY when
+   * the provider reported usage. Never called on an error, and never with a
+   * non-finite or negative count. A throwing callback is swallowed by the
+   * shared `reportUsage` helper: usage accounting must never fail a call.
+   */
+  readonly onUsage?: (usage: AITokenUsage) => void;
 }
 
 export interface AIProviderAdapter {

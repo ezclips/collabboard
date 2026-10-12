@@ -19,6 +19,7 @@ import {
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
 import { aiProviderInvalidConfiguration } from './providers/errors';
+import type { AITokenUsage } from './providers/types';
 import {
   adapterCarriesImages,
   defaultVisionModelFor,
@@ -289,6 +290,12 @@ export interface BoardAiChatResult {
    * the pre-call check read. The credit ledger charges only a managed run.
    */
   readonly source: AIModelResolutionSource;
+  /**
+   * PATCH-345. What the provider reported for this call, or null when it
+   * reported nothing. Own-key calls cost no credits, so this is the only record
+   * of what the user's key spent.
+   */
+  readonly usage: AITokenUsage | null;
 }
 
 /**
@@ -361,6 +368,10 @@ export async function executeBoardAiChat(
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BOARD_AI_CHAT_TIMEOUT_MS);
+  // PATCH-345. Captured through the optional callback, never returned by the
+  // adapter: `generateText` still resolves to a plain string. Null when the
+  // provider reported nothing.
+  let usage: AITokenUsage | null = null;
   try {
     const text = await adapter.generateText({
       model,
@@ -375,12 +386,13 @@ export async function executeBoardAiChat(
       // what it was before this feature existed.
       ...(images.length > 0 ? { images } : {}),
       signal: controller.signal,
+      onUsage: (reported) => { usage = reported; },
     });
     // The provider and model NAMES travel onward for display; the credential
     // stays in `resolved` and is never returned, logged or persisted. The model
     // returned is the one that ACTUALLY ran, substitution included, so the UI
     // can say which model saw the image rather than which one was configured.
-    return { text, provider: resolved.provider, model, source: resolved.source };
+    return { text, provider: resolved.provider, model, source: resolved.source, usage };
   } finally {
     clearTimeout(timer);
   }

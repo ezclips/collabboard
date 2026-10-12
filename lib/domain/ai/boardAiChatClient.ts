@@ -52,4 +52,10 @@ export interface BoardAiChatMessageView {
    * label, never source text, and never anything a model wrote.
    */
   readonly citations?: BoardAiCitationEnvelope | null;
+  /**
+   * PATCH-345. What the provider reported for this assistant turn, or null/absent
+   * when it reported nothing (and always for a user message). Tokens, not money.
+   */
+  readonly inputTokens?: number | null;
+  readonly outputTokens?: number | null;
 }

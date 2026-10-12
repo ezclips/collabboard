@@ -16,7 +16,8 @@ import {
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
-import type { AIGenerateTextInput, AIProviderAdapter } from './types';
+import { finiteTokenCount, reportUsage } from './usage';
+import type { AIGenerateTextInput, AIProviderAdapter, AITokenUsage } from './types';
 
 export const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 
@@ -46,6 +47,30 @@ interface InteractionsPayload {
    *                  "content": [ { "text": "hello", "type": "text" } ] } ] }
    */
   readonly steps?: readonly InteractionsStep[];
+  /**
+   * PATCH-345. The INTERACTIONS API reports usage here -- `usage.total_*`, NOT
+   * the `usageMetadata.promptTokenCount`/`candidatesTokenCount` shape, which
+   * belongs to generateContent. Reading the generateContent field was the exact
+   * class of mistake the `steps` comment above describes: a fixture written
+   * from the wrong API. Thought tokens are billed as output, so they count
+   * toward output.
+   */
+  readonly usage?: {
+    readonly total_input_tokens?: unknown;
+    readonly total_output_tokens?: unknown;
+    readonly total_thought_tokens?: unknown;
+  };
+}
+
+/** The reported usage, or null when the response carried none. */
+function geminiUsage(payload: InteractionsPayload | null): AITokenUsage | null {
+  const inputTokens = finiteTokenCount(payload?.usage?.total_input_tokens);
+  const outputTokens = finiteTokenCount(payload?.usage?.total_output_tokens);
+  if (inputTokens === null || outputTokens === null) return null;
+  return {
+    inputTokens,
+    outputTokens: outputTokens + (finiteTokenCount(payload?.usage?.total_thought_tokens) ?? 0),
+  };
 }
 
 /** Step kinds that are never part of the answer, whatever text they carry. */
@@ -149,6 +174,8 @@ export const geminiAdapter: AIProviderAdapter = {
       payload = null;
     }
 
-    return requireProviderText('gemini', extractInteractionsText(payload));
+    const text = requireProviderText('gemini', extractInteractionsText(payload));
+    reportUsage(input, geminiUsage(payload));
+    return text;
   },
 };

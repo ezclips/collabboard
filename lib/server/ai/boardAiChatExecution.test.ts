@@ -208,8 +208,32 @@ describe('the execution seam reuses the existing authorities', () => {
     // 14/15. The credential reaches the adapter and nothing else.
     // PATCH-187: `source` is the one that ACTUALLY ran, so the credit ledger
     // charges only a managed call.
-    expect(result).toEqual({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat', source: 'collabboard-default' });
+    expect(result).toEqual({ text: 'answer', provider: 'deepseek', model: 'deepseek-chat', source: 'collabboard-default', usage: null });
     expect(JSON.stringify(result)).not.toContain('sk-secret-value');
+    vi.doUnmock('./resolveAIModelForRole');
+    vi.doUnmock('./providers/registry');
+    vi.resetModules();
+  });
+
+  it('PATCH-345. carries the usage the adapter reported, and null when it reports none', async () => {
+    vi.resetModules();
+    const generateText = vi.fn(async (input: { onUsage?: (u: { inputTokens: number; outputTokens: number }) => void }) => {
+      input.onUsage?.({ inputTokens: 120, outputTokens: 34 });
+      return 'answer';
+    });
+    const resolveAIModelForRole = vi.fn(async () => ({
+      source: 'collabboard-default', provider: 'deepseek', model: 'deepseek-chat',
+      apiKey: 'sk-secret-value', connectionId: null,
+    }));
+    vi.doMock('./resolveAIModelForRole', () => ({ resolveAIModelForRole }));
+    vi.doMock('./providers/registry', () => ({ getAIProviderAdapter: () => ({ provider: 'deepseek', generateText }) }));
+
+    const mod = await import('./boardAiChatExecution');
+    const result = await mod.executeBoardAiChat('user-1' as never, [turn('user', 'hi')], {
+      preferences: {} as never, credentials: {} as never, allowByok: false,
+    });
+
+    expect(result.usage).toEqual({ inputTokens: 120, outputTokens: 34 });
     vi.doUnmock('./resolveAIModelForRole');
     vi.doUnmock('./providers/registry');
     vi.resetModules();

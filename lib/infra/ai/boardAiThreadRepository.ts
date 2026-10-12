@@ -44,7 +44,26 @@ interface MessageRow {
   readonly id: string; readonly thread_id: string; readonly role: string; readonly content: string;
   readonly provider: string | null; readonly model: string | null;
   readonly context: unknown; readonly citations: unknown; readonly created_at: string;
+  // PATCH-345. Nullable: absent on user messages and on any reply whose
+  // provider reported no usage.
+  readonly input_tokens?: number | null; readonly output_tokens?: number | null;
 }
+
+/**
+ * PATCH-345. A stored message plus the token counts. The domain `BoardAiMessage`
+ * stays the storage-agnostic shape; the two extra nullable columns are named
+ * here rather than in the domain file.
+ */
+export interface BoardAiStoredMessage extends BoardAiMessage {
+  readonly inputTokens: number | null;
+  readonly outputTokens: number | null;
+}
+
+/** The append input plus the optional, nullable token counts. */
+export type AppendBoardAiMessageInputWithUsage = AppendBoardAiMessageInput & {
+  readonly inputTokens?: number | null;
+  readonly outputTokens?: number | null;
+};
 
 type QueryResult<T> = { data: readonly T[] | null; error: SupabaseErrorLike | null };
 
@@ -85,7 +104,7 @@ export interface BoardAiChatSupabaseClient {
 }
 
 const THREAD_COLUMNS = 'id, board_id, user_id, title, created_at, updated_at';
-const MESSAGE_COLUMNS = 'id, thread_id, role, content, provider, model, context, citations, created_at';
+const MESSAGE_COLUMNS = 'id, thread_id, role, content, provider, model, context, citations, created_at, input_tokens, output_tokens';
 
 function toThread(row: ThreadRow): BoardAiThread {
   return {
@@ -103,7 +122,7 @@ function toThread(row: ThreadRow): BoardAiThread {
  * constraint makes it unreachable, and inventing a role for a row nobody can
  * explain is worse than omitting it.
  */
-function toMessage(row: MessageRow): BoardAiMessage | null {
+function toMessage(row: MessageRow): BoardAiStoredMessage | null {
   if (!isBoardAiMessageRole(row.role)) return null;
   return {
     id: row.id,
@@ -115,6 +134,8 @@ function toMessage(row: MessageRow): BoardAiMessage | null {
     context: (row.context ?? null) as BoardAiMessage['context'],
     citations: (row.citations ?? null) as BoardAiMessage['citations'],
     createdAt: row.created_at,
+    inputTokens: typeof row.input_tokens === 'number' ? row.input_tokens : null,
+    outputTokens: typeof row.output_tokens === 'number' ? row.output_tokens : null,
   };
 }
 
@@ -211,7 +232,7 @@ export class SupabaseBoardAiThreadRepository {
     userId: UserId,
     boardId: BoardId,
     threadId: string,
-  ): Promise<Result<readonly BoardAiMessage[], DomainError>> {
+  ): Promise<Result<readonly BoardAiStoredMessage[], DomainError>> {
     // The thread is resolved through the scoped read first, so a thread id
     // belonging to another user or another board never reaches the message
     // query at all.
@@ -229,7 +250,7 @@ export class SupabaseBoardAiThreadRepository {
       return err(domainError('unavailable', 'Could not load board chat messages', { cause: error }));
     }
 
-    const messages: BoardAiMessage[] = [];
+    const messages: BoardAiStoredMessage[] = [];
     for (const row of data ?? []) {
       const message = toMessage(row);
       if (message) messages.push(message);
@@ -241,8 +262,8 @@ export class SupabaseBoardAiThreadRepository {
     userId: UserId,
     boardId: BoardId,
     threadId: string,
-    input: AppendBoardAiMessageInput,
-  ): Promise<Result<BoardAiMessage, DomainError>> {
+    input: AppendBoardAiMessageInputWithUsage,
+  ): Promise<Result<BoardAiStoredMessage, DomainError>> {
     if (!isBoardAiMessageRole(input.role)) {
       return err(domainError('validation', 'Board chat message role is invalid'));
     }
@@ -266,6 +287,10 @@ export class SupabaseBoardAiThreadRepository {
         model: input.model ?? null,
         context: input.context ?? null,
         citations: input.citations ?? null,
+        // PATCH-345. Omitted entirely when null, so the column default (null)
+        // applies and a run with no usage stores no number.
+        ...(typeof input.inputTokens === 'number' ? { input_tokens: input.inputTokens } : {}),
+        ...(typeof input.outputTokens === 'number' ? { output_tokens: input.outputTokens } : {}),
       })
       .select(MESSAGE_COLUMNS)
       .single();

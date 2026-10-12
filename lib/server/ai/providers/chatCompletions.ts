@@ -21,12 +21,26 @@ import {
   aiProviderTransportError,
   requireProviderText,
 } from './errors';
-import type { AIExecutionProvider, AIGenerateTextInput } from './types';
+import { finiteTokenCount, reportUsage } from './usage';
+import type { AIExecutionProvider, AIGenerateTextInput, AITokenUsage } from './types';
 
 interface ChatCompletionsResponse {
   readonly choices?: readonly {
     readonly message?: { readonly content?: unknown };
   }[];
+  /** PATCH-345. Chat Completions reports usage here (DeepSeek, OpenRouter). */
+  readonly usage?: {
+    readonly prompt_tokens?: unknown;
+    readonly completion_tokens?: unknown;
+  };
+}
+
+/** The reported usage, or null when the response carried none. */
+function chatCompletionsUsage(payload: ChatCompletionsResponse | null): AITokenUsage | null {
+  const inputTokens = finiteTokenCount(payload?.usage?.prompt_tokens);
+  const outputTokens = finiteTokenCount(payload?.usage?.completion_tokens);
+  if (inputTokens === null || outputTokens === null) return null;
+  return { inputTokens, outputTokens };
 }
 
 /**
@@ -112,5 +126,7 @@ export async function chatCompletionsGenerateText(
     payload = null;
   }
 
-  return requireProviderText(provider, payload?.choices?.[0]?.message?.content);
+  const text = requireProviderText(provider, payload?.choices?.[0]?.message?.content);
+  reportUsage(input, chatCompletionsUsage(payload));
+  return text;
 }
