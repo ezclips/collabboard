@@ -17,7 +17,6 @@ import {
 } from './KnowledgePdfUploader';
 import {
   KNOWLEDGE_CONTROL_ACTIVE_BLUE,
-  KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
   KNOWLEDGE_ICON_BUTTON_CLASS,
 } from './knowledgeReaderControls';
 
@@ -155,19 +154,29 @@ function menuItemByText(text: string): HTMLElement | null {
     .find((node) => node.textContent?.includes(text)) ?? null;
 }
 
+/** PATCH-346 Addendum 3: the panel's switch names the open panel. */
+function panelTitle(scope: HTMLElement): string | null {
+  return scope.querySelector('[data-knowledge-reader-panel-title]')
+    ?.getAttribute('data-knowledge-reader-panel-title') ?? null;
+}
+
 function TestWorkspace({
   initialTabs = [],
   initialActive = null,
   aiAvailable = true,
+  // PATCH-346 Addendum 2: the dock is a single toggle now, so a test that needs
+  // the AI panel starts with it open rather than switching to it via the dock.
+  initialRightPanel = 'closed',
 }: {
   initialTabs?: PdfWorkspaceTab[];
   initialActive?: string | null;
   aiAvailable?: boolean;
+  initialRightPanel?: PdfWorkspaceRightPanel;
 }) {
   const [open, setOpen] = useState(initialTabs.length > 0);
   const [workspaceTabs, setWorkspaceTabs] = useState<PdfWorkspaceTab[]>(initialTabs);
   const [activeId, setActiveId] = useState<string | null>(initialActive ?? initialTabs[0]?.documentId ?? null);
-  const [rightPanel, setRightPanel] = useState<PdfWorkspaceRightPanel>('closed');
+  const [rightPanel, setRightPanel] = useState<PdfWorkspaceRightPanel>(initialRightPanel);
 
   const openDocument = (document: PdfWorkspaceTab) => {
     setOpen(true);
@@ -293,36 +302,41 @@ describe('PdfWorkspaceChrome', () => {
     expect(activeReader(container)).toBe('doc-c');
   });
 
-  it('keeps right panels mutually exclusive and switches panel document identity with the active PDF', () => {
+  it('PATCH-346 Addendum 2/3: the switch changes panels, the toggle closes, and the panel follows the active PDF', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha, beta]} initialActive="doc-a" />);
+    const toggle = () => container.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+    const aiTab = () => Array.from(container.querySelectorAll('[role="tab"]'))
+      .find((tab) => tab.textContent?.includes('AI')) as HTMLElement;
 
-    click(container.querySelector('[data-pdf-workspace-dock="library"]'));
+    click(toggle());
     expect(container.querySelector('[data-pdf-workspace-main="true"]')?.className).toContain('flex-1');
     expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')?.className).toContain('w-[clamp(360px,28vw,400px)]');
-    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('bg-blue-50');
-    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className).toContain('text-blue-700');
+    expect(toggle().className).toContain('bg-blue-50');
+    expect(toggle().className).toContain('text-blue-700');
+    expect(toggle().getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Alpha.pdf');
-    expect(container.querySelector('[data-pdf-workspace-panel-title="true"]')?.textContent).toBe('Library');
+    expect(panelTitle(container)).toBe('Library');
     expect(container.querySelector('[data-testid="panel-context"]')?.textContent).toBe('doc-a');
 
+    // The panel's own switch changes it to AI.
+    click(aiTab());
+    expect(panelTitle(container)).toBe('AI');
+    expect(container.querySelectorAll('[data-pdf-workspace-right-panel-content="true"]')).toHaveLength(1);
+
+    // The panel follows the active document.
     click(container.querySelector('[data-pdf-workspace-tab="doc-b"] button'));
     expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Beta.pdf');
     expect(container.querySelector('[data-testid="panel-context"]')?.textContent).toBe('doc-b');
 
-    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
-    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.getAttribute('aria-pressed')).toBe('false');
-    expect(container.querySelector('[data-pdf-workspace-dock="ai"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(container.querySelectorAll('[data-pdf-workspace-right-panel-content="true"]')).toHaveLength(1);
-    expect(container.querySelector('[data-pdf-workspace-panel-title="true"]')?.textContent).toBe('AI');
-    expect(container.querySelector('[data-pdf-workspace-panel-document="true"]')?.textContent).toBe('Beta.pdf');
-
-    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
+    // The toggle closes it.
+    click(toggle());
     expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')).toBeNull();
+    expect(toggle().getAttribute('aria-pressed')).toBe('false');
   });
 
   it('G: the focused host owns the whole viewport, so its active panel is never hidden either', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
-    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
+    click(container.querySelector('[data-pdf-workspace-dock="toggle"]'));
 
     // Same rule as the docked reader, reached differently: this host is
     // fixed inset-0, so its panel needs no responsive relocation -- but it
@@ -398,14 +412,14 @@ describe('PdfWorkspaceChrome header dock', () => {
       '[data-pdf-workspace-fixed-tab-controls="true"] button',
     ));
 
-  it('puts Library and AI in the header, immediately before the close control', () => {
+  it('puts ONE panel toggle in the header, immediately before the close control', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
 
     const order = headerControls(container).map((node) => (
       node.dataset.pdfWorkspaceDock
         ?? (node.dataset.pdfWorkspaceClose ? 'close' : node.dataset.pdfWorkspaceAllMenu ? 'all' : node.dataset.pdfWorkspaceAdd ? 'add' : 'other')
     ));
-    expect(order.slice(-3)).toEqual(['library', 'ai', 'close']);
+    expect(order.slice(-2)).toEqual(['toggle', 'close']);
 
     // The strip they used to live in is gone, and the reader keeps that width.
     expect(container.querySelector('[data-pdf-workspace-dock-controls]')).toBeNull();
@@ -416,46 +430,83 @@ describe('PdfWorkspaceChrome header dock', () => {
   it('is drawn from the reader toolbar\'s own control class, not a lookalike', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
 
-    for (const panel of ['library', 'ai']) {
-      const button = container.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLElement;
-      // Literally the bottom toolbar's class, tint aside: same box, border,
-      // radius, weight and hover as search / Create Note / Select area.
-      expect(button.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
-      expect(button.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
-      // Quiet while inactive: no filled block, no oversized treatment.
-      expect(button.className).not.toContain('bg-blue-600');
-      expect(button.className).not.toContain('bg-purple-600');
-    }
+    const button = container.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+    // Literally the bottom toolbar's class, tint aside: same box, border,
+    // radius, weight and hover as search / Create Note / Select area.
+    expect(button.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
+    expect(button.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
+    // Quiet while closed: no filled block, no oversized treatment.
+    expect(button.className).not.toContain('bg-blue-600');
+    expect(button.className).not.toContain('bg-purple-600');
   });
 
-  it('tints on activation without changing the shape', () => {
+  it('tints while the panel is open without changing the shape', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
-    const library = () => container.querySelector('[data-pdf-workspace-dock="library"]') as HTMLElement;
+    const toggle = () => container.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
 
-    click(library());
-    expect(library().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
-    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
-    expect(container.querySelector('[data-pdf-workspace-dock="ai"]')?.className)
-      .toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_PURPLE);
-    // The shape is untouched by either tint.
-    expect(library().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
+    click(toggle());
+    expect(toggle().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    // The shape is untouched by the tint.
+    click(toggle());
+    expect(toggle().className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
   });
 
-  it('keeps each panel its own colour while active, and omits AI where it is unavailable', () => {
+  it('is one toggle, present whether or not AI is available', () => {
     const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
-
-    click(container.querySelector('[data-pdf-workspace-dock="ai"]'));
-    const ai = container.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement;
-    expect(ai.getAttribute('aria-pressed')).toBe('true');
-    expect(ai.className).toContain('bg-purple-50');
-    expect(ai.className).toContain('text-purple-700');
-    expect(container.querySelector('[data-pdf-workspace-dock="library"]')?.className)
-      .not.toContain('bg-blue-50');
+    expect(container.querySelectorAll('[data-pdf-workspace-dock]')).toHaveLength(1);
 
     const withoutAi = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" aiAvailable={false} />);
-    expect(withoutAi.querySelector('[data-pdf-workspace-dock="library"]')).not.toBeNull();
-    expect(withoutAi.querySelector('[data-pdf-workspace-dock="ai"]')).toBeNull();
+    expect(withoutAi.querySelector('[data-pdf-workspace-dock="toggle"]')).not.toBeNull();
     expect(withoutAi.querySelector('[data-pdf-workspace-close="true"]')).not.toBeNull();
+  });
+
+  it('PATCH-346 Addendum 2: closed opens the last panel, open closes, and it remembers AI', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+    const toggle = () => container.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+
+    // Closed -> opens the default (Library).
+    click(toggle());
+    expect(panelTitle(container)).toBe('Library');
+    // Open -> closes.
+    click(toggle());
+    expect(container.querySelector('[data-pdf-workspace-right-panel-content="true"]')).toBeNull();
+
+    // Remembers AI: opened last on AI, closed, reopened lands back on AI.
+    const ai = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" initialRightPanel="ai" />);
+    const aiToggle = () => ai.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+    click(aiToggle());
+    expect(ai.querySelector('[data-pdf-workspace-right-panel-content="true"]')).toBeNull();
+    click(aiToggle());
+    expect(panelTitle(ai)).toBe('AI');
+  });
+
+  it('PATCH-346 Addendum 2: a remembered AI falls back to Library when AI is unavailable', () => {
+    const container = mount(
+      <TestWorkspace initialTabs={[alpha]} initialActive="doc-a" initialRightPanel="ai" aiAvailable={false} />,
+    );
+    const toggle = () => container.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+
+    click(toggle()); // close
+    click(toggle()); // reopen -> Library, because AI is not offered
+    expect(panelTitle(container)).toBe('Library');
+  });
+
+  it('PATCH-346 Addendum 3: the workspace panel shows the switch, no AI tab without AI, and no panel X', () => {
+    const container = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" />);
+    click(container.querySelector('[data-pdf-workspace-dock="toggle"]'));
+
+    const tabs = Array.from(container.querySelectorAll('[data-pdf-workspace-right-panel-content] [role="tab"]'))
+      .map((tab) => tab.textContent ?? '');
+    expect(tabs.some((label) => label.includes('Library'))).toBe(true);
+    expect(tabs.some((label) => label.includes('AI'))).toBe(true);
+    // The top-bar toggle is the only close control.
+    expect(container.querySelector('[data-pdf-workspace-panel-close]')).toBeNull();
+
+    const withoutAi = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" aiAvailable={false} />);
+    click(withoutAi.querySelector('[data-pdf-workspace-dock="toggle"]'));
+    const noAiTabs = Array.from(withoutAi.querySelectorAll('[data-pdf-workspace-right-panel-content] [role="tab"]'))
+      .map((tab) => tab.textContent ?? '');
+    expect(noAiTabs.some((label) => label.includes('AI'))).toBe(false);
   });
 });
 

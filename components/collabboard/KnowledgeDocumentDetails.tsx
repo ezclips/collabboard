@@ -7,6 +7,7 @@ import type {
 } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
 import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from '@/lib/domain/knowledge/knowledgeSourceReferenceWrite';
 import { useKnowledgeReaderActivePage } from './useKnowledgeReaderActivePage';
+import KnowledgeReaderPanelHeader from './KnowledgeReaderPanelHeader';
 import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE } from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
 import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 /**
@@ -188,6 +189,8 @@ export interface KnowledgeDocumentDetailsProps {
    */
   onOpenBacklinkTarget?: (targetPadletId: string) => void;
   onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;
+  /** PATCH-346 Addendum 1. Opens the Library panel; absent -> UsedInNotes stays. */
+  onOpenLibrary?: () => void;
 }
 
 /**
@@ -630,7 +633,7 @@ export default function KnowledgeDocumentDetails({
   initialSourceReferenceId,
   initialSourceRequestId,
   onOpenBacklinkTarget,
-  onRevealBacklinkTargetOnBoard,
+  onRevealBacklinkTargetOnBoard, onOpenLibrary,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -1385,37 +1388,32 @@ export default function KnowledgeDocumentDetails({
           document itself rather than repeating Back / filename / page count /
           Used in Notes above it. */}
       {hostRendersDocumentHeader ? null : (
-        <>
-          <button
-            type="button"
-            className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
-            onClick={onBack}
-          >
-            ← Back to PDFs
-          </button>
-          <div className="mb-3 border-b border-gray-100 pb-2">
-            <h2 className="truncate text-sm font-medium text-gray-800" title={originalFilename}>
-              {originalFilename}
-            </h2>
-            {pageSummary !== null ? (
-              <p className="text-[11px] text-gray-500">{pageSummary}</p>
-            ) : null}
-            {transcriptRepresentation ? (
-              // ALWAYS for a transcript, not only beside a timestamp. A reader
-              // who saw this notice only where links appear would reasonably
-              // conclude the rest had been checked.
-              <p className="text-[11px] text-gray-500">
-                {KNOWLEDGE_TRANSCRIPT_DISCLOSURE}
-              </p>
-            ) : null}
+        <div className="mb-3">
+          {/* PATCH-346 Addendum 1. The SAME header, with no tab switch. */}
+          <KnowledgeReaderPanelHeader
+            filename={originalFilename}
+            kind={transcriptRepresentation ? 'transcript' : 'pdf'}
+            pageSummary={pageSummary} noteCount={documentRows.length}
+            panel="library" aiAvailable={false} showPanelSwitch={false}
+            onSelectPanel={onOpenLibrary ? () => onOpenLibrary() : undefined}
+          />
+          {transcriptRepresentation ? (
+            // ALWAYS for a transcript, not only beside a timestamp. A reader
+            // who saw this notice only where links appear would reasonably
+            // conclude the rest had been checked.
+            <p className="text-[11px] text-gray-500">
+              {KNOWLEDGE_TRANSCRIPT_DISCLOSURE}
+            </p>
+          ) : null}
+          {onOpenLibrary ? null : (
             <UsedInNotes
               scope="document"
               rows={documentRows}
               onOpen={onOpenBacklinkTarget}
               onShowOnBoard={onRevealBacklinkTargetOnBoard}
             />
-          </div>
-        </>
+          )}
+        </div>
       )}
 
       {loading ? (

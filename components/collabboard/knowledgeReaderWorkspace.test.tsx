@@ -21,6 +21,7 @@ const executable = (source: string) =>
   source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const DRAWER = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
+const HEADER = read('components/collabboard/KnowledgeReaderPanelHeader.tsx');
 const DETAILS = read('components/collabboard/KnowledgeDocumentDetails.tsx');
 const SURFACE = read('components/collabboard/KnowledgePdfCanvasSurface.tsx');
 const REGISTRY = read('components/collabboard/canvas/ui/canvasToolbarRegistry.tsx');
@@ -78,14 +79,25 @@ describe('7-13. the Library panel owns the document identity', () => {
     return DRAWER.slice(at, DRAWER.indexOf('</aside>', at));
   };
 
-  it('7-10. Back, filename, page count and Used in Notes all live here', () => {
+  it('7-10. PATCH-346: the shared header owns the filename, page count and the note count', () => {
     const pane = libraryPane();
-    expect(pane).toContain('data-knowledge-library-back="true"');
-    expect(pane).toContain('← Back to PDFs');
-    expect(pane).toContain('data-knowledge-library-filename="true"');
-    expect(pane).toContain('data-knowledge-library-pagecount="true"');
-    // Multi-line since the reveal action joined it; the scope is what matters.
-    expect(pane).toMatch(/<UsedInNotes[\s\S]{0,120}scope="document"/);
+    // The inline <header> became the shared KnowledgeReaderPanelHeader.
+    expect(pane).toContain('<KnowledgeReaderPanelHeader');
+    expect(pane).toContain('filename={reader.originalFilename}');
+    expect(pane).toContain('pageSummary={libraryPageSummary}');
+    expect(pane).toContain('noteCount={libraryBacklinkRows.length}');
+    // The "Used in Notes" list moved to the Library tab's own Notes section;
+    // the header no longer renders it.
+    expect(DRAWER).not.toContain('data-knowledge-used-in-notes');
+    // Addendum 4: the header has no back control -- the reader closes from the
+    // top bar instead.
+    expect(HEADER).not.toContain('data-knowledge-library-back');
+    expect(pane).not.toContain('onBack={closeReader}');
+    // The identity hooks live in the header component now.
+    expect(HEADER).toContain('data-knowledge-library-filename="true"');
+    expect(HEADER).toContain('data-knowledge-library-pagecount="true"');
+    expect(HEADER).toContain('data-knowledge-library-note-count="true"');
+    expect(HEADER).toContain('data-knowledge-reader-panel-title');
   });
 
   it('11-12. the reference links and the Notes list are the existing ones', () => {
@@ -96,7 +108,9 @@ describe('7-13. the Library panel owns the document identity', () => {
     expect(pane).toContain('<PdfWorkspaceLibraryPanel');
     expect(pane).toContain('documentId={reader.documentId}');
     // Line-ending agnostic: this repo has mixed CRLF/LF sources.
-    expect(DRAWER).toMatch(/import KnowledgeDocumentDetails, \{\s*UsedInNotes,\s*pageCountSummary,/);
+    // PATCH-346: UsedInNotes moved to the header's Library tab, so only the page
+    // formatter is still imported here.
+    expect(DRAWER).toMatch(/import KnowledgeDocumentDetails, \{\s*pageCountSummary,/);
     expect(DRAWER).not.toContain('<KnowledgeSourceNotesPanel');
     // And the rows come from the same board index, not a second fetch.
     expect(DRAWER).toContain('useKnowledgeSourceBacklinksForDocument(reader?.documentId ?? null)');

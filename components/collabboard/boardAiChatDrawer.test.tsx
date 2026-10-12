@@ -1839,3 +1839,17 @@ describe('PATCH-343 the AI credit bar', () => {
     expect(creditsGets()).toBe(1);
   });
 });
+
+describe('PATCH-346 the embedded chat hides its own close button', () => {
+  it('embedded: the reader top bar owns closing, so there is no X here', async () => {
+    await mount({ presentation: 'embedded' });
+    expect(q('[data-board-ai-chat-action="close"]')).toBeNull();
+    // Model chooser and New chat stay.
+    expect(q('[data-board-ai-chat-action="new"]')).not.toBeNull();
+  });
+
+  it('the standalone drawer keeps its X', async () => {
+    await mount();
+    expect(q('[data-board-ai-chat-action="close"]')).not.toBeNull();
+  });
+});

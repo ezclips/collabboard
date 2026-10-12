@@ -1,10 +1,9 @@
 "use client";
 
 import React from 'react';
-import { Library, Sparkles } from 'lucide-react';
+import { PanelRightClose, PanelRightOpen } from 'lucide-react';
 import {
   KNOWLEDGE_CONTROL_ACTIVE_BLUE,
-  KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
   KNOWLEDGE_ICON_BUTTON_CLASS,
   KNOWLEDGE_ICON_SIZE_CLASS,
 } from '@/components/collabboard/knowledgeReaderControls';
@@ -25,55 +24,56 @@ export interface PdfReaderDockProps {
 }
 
 /**
- * Library and AI, in the PDF header, immediately before its close control.
+ * PATCH-346 Addendum 2. ONE show/hide toggle, not a Library button and an AI
+ * button: the panel's own Library | AI switch does the switching, and the top
+ * bar only opens and closes the panel. Two icons here duplicated that switch,
+ * which is what the owner saw ("you have the same button twice").
  *
- * They are the reader's own compact controls -- the SAME shared class the
- * bottom toolbar's search, Create Note and Select area buttons are drawn
- * from, not a lookalike -- so the header and the footer read as one toolbar.
- * Turning one on only tints it, in that panel's colour; the shape never
- * changes.
+ * The control is the SAME shared icon-button class the bottom toolbar's search,
+ * Create Note and Select area buttons are drawn from, not a lookalike, so the
+ * header and the footer read as one toolbar. Open, it tints in the panel blue;
+ * the shape never changes.
  *
- * Extracted into one component rather than copied into each host, because two
- * docks that drift apart is exactly the "two different PDF experiences" this
- * consolidation exists to end.
+ * Reopening restores the panel that was open LAST, so a reader who was on AI,
+ * closed it and reopened it lands back on AI rather than losing their place.
  */
 export default function PdfReaderDock({
   panel,
   aiAvailable = false,
   onPanelChange,
 }: PdfReaderDockProps) {
-  // Clicking the open panel's own button closes it: the dock is a toggle, and
-  // the PDF beside it stays visible and usable either way.
-  const toggle = (next: Exclude<PdfReaderPanel, 'closed'>) => {
-    onPanelChange(panel === next ? 'closed' : next);
+  // Remembered while the panel is open; 'library' until then. A ref, not state:
+  // it must not re-render the dock, and it must survive the panel closing.
+  const lastOpenPanelRef = React.useRef<Exclude<PdfReaderPanel, 'closed'>>('library');
+  if (panel !== 'closed') lastOpenPanelRef.current = panel;
+
+  const isOpen = panel !== 'closed';
+  const toggle = () => {
+    if (isOpen) {
+      onPanelChange('closed');
+      return;
+    }
+    // Board AI can be withdrawn between sessions; a remembered 'ai' must not
+    // reopen a panel that is no longer offered.
+    const remembered = lastOpenPanelRef.current;
+    onPanelChange(remembered === 'ai' && !aiAvailable ? 'library' : remembered);
   };
 
   return (
     <div data-pdf-reader-dock="true" className="flex shrink-0 items-center gap-1">
       <button
         type="button"
-        data-pdf-workspace-dock="library"
-        aria-pressed={panel === 'library'}
-        aria-label="Library"
-        title="Library"
-        className={`${KNOWLEDGE_ICON_BUTTON_CLASS}${panel === 'library' ? KNOWLEDGE_CONTROL_ACTIVE_BLUE : ''}`}
-        onClick={() => toggle('library')}
+        data-pdf-workspace-dock="toggle"
+        aria-pressed={isOpen}
+        aria-label={isOpen ? 'Hide side panel' : 'Show side panel'}
+        title={isOpen ? 'Hide side panel' : 'Show side panel'}
+        className={`${KNOWLEDGE_ICON_BUTTON_CLASS}${isOpen ? KNOWLEDGE_CONTROL_ACTIVE_BLUE : ''}`}
+        onClick={toggle}
       >
-        <Library className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />
+        {isOpen
+          ? <PanelRightClose className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />
+          : <PanelRightOpen className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />}
       </button>
-      {aiAvailable ? (
-        <button
-          type="button"
-          data-pdf-workspace-dock="ai"
-          aria-pressed={panel === 'ai'}
-          aria-label="AI"
-          title="AI"
-          className={`${KNOWLEDGE_ICON_BUTTON_CLASS}${panel === 'ai' ? KNOWLEDGE_CONTROL_ACTIVE_PURPLE : ''}`}
-          onClick={() => toggle('ai')}
-        >
-          <Sparkles className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />
-        </button>
-      ) : null}
     </div>
   );
 }

@@ -1660,16 +1660,20 @@ export default function BoardAiChatDrawer({
           >
             <MessageSquarePlus className="h-4 w-4" aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            data-board-ai-chat-action="close"
-            title="Close"
-            aria-label="Close Board AI"
-            className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
-            onClick={onClose}
-          >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
+          {/* PATCH-346. Embedded in the reader, the top bar already owns
+              closing; two X's in one column is the duplicate the owner saw. */}
+          {!isEmbedded && (
+            <button
+              type="button"
+              data-board-ai-chat-action="close"
+              title="Close"
+              aria-label="Close Board AI"
+              className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+              onClick={onClose}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
       </header>
 

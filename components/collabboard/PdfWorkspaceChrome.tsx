@@ -3,6 +3,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Files, Plus, Upload, X } from 'lucide-react';
 import PdfReaderDock, { type PdfReaderPanel } from '@/components/collabboard/PdfReaderDock';
+import { KnowledgeReaderPanelSwitch } from '@/components/collabboard/KnowledgeReaderPanelHeader';
 import KnowledgeExistingPdfPicker from '@/components/collabboard/KnowledgeExistingPdfPicker';
 import KnowledgePdfUploader, {
   KNOWLEDGE_PDF_INPUT_ID,
@@ -290,23 +291,18 @@ export default function PdfWorkspaceChrome({
             className="flex min-h-0 w-[clamp(360px,28vw,400px)] shrink-0 flex-col border-l border-gray-200 bg-white shadow-[-8px_0_24px_rgba(15,23,42,0.06)]"
             aria-label={`${rightPanel === 'library' ? 'Library' : 'AI'} for ${activeFilename}`}
           >
-            <header className="flex shrink-0 items-center gap-2 border-b border-gray-100 px-3 py-2">
-              <div className="min-w-0 flex-1">
-                <div data-pdf-workspace-panel-title="true" className="text-xs font-semibold text-gray-800">{rightPanel === 'library' ? 'Library' : 'AI'}</div>
-                <div data-pdf-workspace-panel-document="true" className="truncate text-[11px] text-gray-500" title={activeFilename}>
-                  {activeFilename}
-                </div>
+            <header className="shrink-0 border-b border-gray-100 px-3 py-2">
+              {/* PATCH-346 Addendum 3. The SAME switch the docked reader's panel
+                  uses, so the full-screen workspace can change panels again;
+                  the top-bar toggle is the only close control now. */}
+              <KnowledgeReaderPanelSwitch
+                panel={rightPanel === 'ai' ? 'ai' : 'library'}
+                aiAvailable={aiAvailable}
+                onSelectPanel={onRightPanelChange}
+              />
+              <div data-pdf-workspace-panel-document="true" className="mt-2 truncate text-[11px] text-gray-500" title={activeFilename}>
+                {activeFilename}
               </div>
-              <button
-                type="button"
-                data-pdf-workspace-panel-close="true"
-                aria-label="Close right panel"
-                title="Close"
-                className="rounded-md p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
-                onClick={() => onRightPanelChange('closed')}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
             </header>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3">
               {rightPanelContent}

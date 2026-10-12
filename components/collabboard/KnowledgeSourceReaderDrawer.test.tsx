@@ -26,7 +26,6 @@ import {
 } from '@/lib/domain/knowledge/knowledgeSourceNavigation';
 import {
   KNOWLEDGE_CONTROL_ACTIVE_BLUE,
-  KNOWLEDGE_CONTROL_ACTIVE_PURPLE,
   KNOWLEDGE_ICON_BUTTON_CLASS,
 } from './knowledgeReaderControls';
 import { buildKnowledgeSourceNoteSummaryIndex } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
@@ -397,9 +396,11 @@ describe('P6J-F5 create Note from a source page (relocated)', () => {
     // PDF-R6J-C2: ONE reader-level action, aimed at the page in view.
     expect(createNoteButtons()).toHaveLength(1);
 
-    const back = Array.from(drawerEl()!.querySelectorAll('button'))
-      .find((button) => button.textContent?.includes('Back to PDFs'))!;
-    await act(async () => { back.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // PATCH-346 Addendum 4: the reading pane's header no longer has a back
+    // control -- the reader is closed from the top bar.
+    expect(drawerEl()!.querySelector('[data-knowledge-library-back="true"]')).toBeNull();
+    const close = drawerEl()!.querySelector('button[aria-label="Close Knowledge reader"]') as HTMLButtonElement;
+    await act(async () => { close.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
 
     expect(drawerEl()).toBeNull();
   });
@@ -1018,22 +1019,36 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     } as never);
   };
 
-  const dockButton = (panel: 'library' | 'ai') =>
-    drawerEl()!.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLButtonElement | null;
+  // PATCH-346 Addendum 2: ONE show/hide toggle; the panel's own switch selects.
+  const dockToggle = () =>
+    drawerEl()!.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLButtonElement | null;
+  const panelTab = (panel: 'library' | 'ai') =>
+    Array.from(drawerEl()!.querySelectorAll('[role="tab"]'))
+      .find((tab) => tab.textContent?.includes(panel === 'ai' ? 'AI' : 'Library')) as HTMLButtonElement | undefined;
   const openPanel = () =>
     (drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
       ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  const clickToggle = async () => {
+    await act(async () => { dockToggle()!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+  };
+  /** Open the panel if closed, then select `panel` through its tab. */
   const clickDock = async (panel: 'library' | 'ai') => {
-    await act(async () => { dockButton(panel)!.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    if (openPanel() === null) await clickToggle();
+    const tab = panelTab(panel);
+    if (tab) {
+      await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    }
     await settle();
   };
 
-  it('opens on Library, with both dock buttons and no legacy AI entry points', async () => {
+  it('opens on Library, with one panel toggle and no legacy AI entry points', async () => {
     await openDocked();
     expect(openPanel()).toBe('library');
-    expect(dockButton('library')!.getAttribute('aria-pressed')).toBe('true');
-    expect(dockButton('ai')).not.toBeNull();
-    expect(dockButton('ai')!.getAttribute('aria-pressed')).toBe('false');
+    expect(dockToggle()!.getAttribute('aria-pressed')).toBe('true');
+    expect(panelTab('library')!.getAttribute('aria-selected')).toBe('true');
+    expect(panelTab('ai')).not.toBeNull();
+    expect(panelTab('ai')!.getAttribute('aria-selected')).toBe('false');
     // The redundant header handoff and the one-shot AI pane are both gone.
     expect(drawerEl()!.querySelector('[data-knowledge-reader-add-document-to-chat]')).toBeNull();
     expect(drawerEl()!.textContent).not.toContain('Add to Board AI');
@@ -1044,31 +1059,31 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(drawerEl()!.textContent).toContain(PAGE_ONE);
   });
 
-  it('docks Library and AI in the header, immediately before the close control', async () => {
+  it('docks ONE panel toggle in the header, immediately before the close control', async () => {
     await openDocked();
     const header = drawerEl()!.querySelector('[data-knowledge-reader-tabs="true"]') as HTMLElement;
     const controls = Array.from(header.querySelectorAll('button'))
       .map((node) => node.getAttribute('data-pdf-workspace-dock') ?? node.getAttribute('aria-label'));
 
-    expect(controls.slice(-3)).toEqual(['library', 'ai', 'Close Knowledge reader']);
-    // Literally the bottom toolbar's own control class, tint aside -- the
-    // header and the footer of this reader are one toolbar.
-    const library = dockButton('library')!;
-    expect(library.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
-    expect(library.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
-    expect(library.className).not.toContain('bg-blue-600');
+    expect(controls.slice(-2)).toEqual(['toggle', 'Close Knowledge reader']);
+    // Literally the bottom toolbar's own control class, tinted while open --
+    // the header and the footer of this reader are one toolbar.
+    const toggle = dockToggle()!;
+    expect(toggle.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    expect(toggle.querySelector('svg')?.getAttribute('class')).toContain('h-3.5 w-3.5');
+    expect(toggle.className).not.toContain('bg-blue-600');
 
-    await clickDock('ai');
-    expect(dockButton('ai')!.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_PURPLE);
-    // The shape never changes when a panel turns on or off.
-    expect(dockButton('library')!.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
+    // The shape never changes when the panel closes.
+    await clickToggle();
+    expect(openPanel()).toBeNull();
+    expect(dockToggle()!.className).toBe(KNOWLEDGE_ICON_BUTTON_CLASS);
 
-    // Closing the drawer is still the control after them.
+    // Closing the drawer is still the control after it.
     await closeDrawer();
     expect(drawerEl()).toBeNull();
   });
 
-  it('shows one panel at a time, and the active button closes it', async () => {
+  it('shows one panel at a time; the toggle closes and reopens the last one', async () => {
     await openDocked();
     expect(drawerEl()!.querySelector('[data-pdf-workspace-library-panel]')).not.toBeNull();
 
@@ -1080,14 +1095,14 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(drawerEl()!.querySelector('[data-pdf-workspace-library-panel]')).toBeNull();
     expect(drawerEl()!.textContent).toContain(PAGE_ONE);
 
-    await clickDock('ai');
+    await clickToggle();
     expect(openPanel()).toBeNull();
     expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).toBeNull();
-    // The dock stays, so the panel can come back.
-    expect(dockButton('library')).not.toBeNull();
+    // The toggle stays, so the panel can come back -- on the panel last open.
+    expect(dockToggle()).not.toBeNull();
 
-    await clickDock('library');
-    expect(openPanel()).toBe('library');
+    await clickToggle();
+    expect(openPanel()).toBe('ai');
   });
 
   it('keeps the document and its page while switching Library and AI', async () => {
@@ -1104,10 +1119,11 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(pageRequests()).toHaveLength(1);
   });
 
-  it('mounts no AI dock at all where Board AI is unavailable', async () => {
+  it('mounts no AI tab at all where Board AI is unavailable', async () => {
     await openDocked({ onBoardAiDraftContextChange: undefined, boardAiDraftContextByDocumentId: undefined });
-    expect(dockButton('library')).not.toBeNull();
-    expect(dockButton('ai')).toBeNull();
+    expect(dockToggle()).not.toBeNull();
+    expect(panelTab('library')).not.toBeNull();
+    expect(panelTab('ai')).toBeUndefined();
     expect(openPanel()).toBe('library');
   });
 
@@ -1124,9 +1140,11 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
 
     const workspace = document.querySelector('[data-pdf-workspace="true"]') as HTMLElement;
     expect(workspace).not.toBeNull();
-    expect(workspace.querySelector('[data-pdf-workspace-dock="library"]')).not.toBeNull();
-    expect(workspace.querySelector('[data-pdf-workspace-dock="ai"]')).not.toBeNull();
-    // Exactly one AI entry point in PDF chrome: the purple dock button.
+    // ONE panel toggle in the top bar (PATCH-346 Addendum 2); the panel's own
+    // switch does the switching. The panel is CONTROLLED here, so it is opened
+    // by prop, not by the toggle.
+    expect(workspace.querySelector('[data-pdf-workspace-dock="toggle"]')).not.toBeNull();
+    // No legacy AI shortcut anywhere in PDF chrome.
     expect(workspace.querySelector('[data-knowledge-reader-add-document-to-chat]')).toBeNull();
     expect(workspace.querySelector('[data-board-ai-chat-open]')).toBeNull();
     expect(workspace.textContent).not.toContain('Add to Board AI');
@@ -1162,8 +1180,8 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
       const pane = drawerEl()!.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement;
       expect(pane, `the ${panel} panel must be mounted`).not.toBeNull();
       expect(hiddenAncestry(pane), `the active ${panel} panel must never be CSS-hidden`).toEqual([]);
-      // The dock that opens it is reachable at every width too.
-      expect(hiddenAncestry(dockButton(panel)!)).toEqual([]);
+      // The toggle that opens it is reachable at every width too.
+      expect(hiddenAncestry(dockToggle()!)).toEqual([]);
     }
   });
 
@@ -1185,7 +1203,7 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(pane.parentElement!.className).toContain('relative');
 
     // Toggling the panel off gives the reading view back, same element.
-    await clickDock('library');
+    await clickToggle();
     expect(openPanel()).toBeNull();
     expect(drawerEl()!.querySelector('[data-knowledge-reader-workspace]')).toBe(reader);
     expect(drawerEl()!.textContent).toContain(PAGE_ONE);
@@ -1206,7 +1224,7 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(drawerEl()!.querySelector('[data-board-ai-chat-input]')).not.toBeNull();
 
     // The exact-selection action, from the selection toolbar over the page.
-    await clickDock('ai');
+    await clickToggle();
     expect(openPanel()).toBeNull();
     const root = drawerEl()!.querySelector('[data-knowledge-page-text-root="1"]') as HTMLElement;
     const range = document.createRange();
@@ -1815,9 +1833,10 @@ describe('citation navigation reveals the cited document', () => {
 
     // Document A, presented the ordinary way: Library open, as it always was.
     expect(openPanel()).toBe('library');
-    // The user opens AI over it, then clicks a citation into document B.
+    // The user switches to AI over it, then clicks a citation into document B.
     await act(async () => {
-      (drawerEl()!.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement).click();
+      (Array.from(drawerEl()!.querySelectorAll('[role="tab"]'))
+        .find((tab) => tab.textContent?.includes('AI')) as HTMLElement).click();
     });
     await settle();
     expect(openPanel()).toBe('ai');
@@ -2010,10 +2029,10 @@ describe('a Note source link reveals its source', () => {
       expect(scrolls).toContain('5');
       expect(openPanel()).toBeNull();
 
-      // The user reopens Library over the document, then clicks the SAME
-      // source again: it must reveal the page a second time.
+      // The user reopens the panel (last = Library) over the document, then
+      // clicks the SAME source again: it must reveal the page a second time.
       await act(async () => {
-        (drawerEl()!.querySelector('[data-pdf-workspace-dock="library"]') as HTMLElement).click();
+        (drawerEl()!.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement).click();
       });
       await settle();
       expect(openPanel()).toBe('library');
@@ -2111,10 +2130,13 @@ describe('the reveal intent belongs to one navigation', () => {
   const openPanel = () =>
     (drawerEl()?.querySelector('[data-knowledge-source-notes-pane]') as HTMLElement | null)
       ?.getAttribute('data-knowledge-reader-right-panel') ?? null;
+  // PATCH-346 Addendum 2: open via the toggle if closed, then pick the tab.
   const clickDock = async (panel: 'library' | 'ai') => {
-    await act(async () => {
-      (drawerEl()!.querySelector(`[data-pdf-workspace-dock="${panel}"]`) as HTMLElement).click();
-    });
+    const toggle = drawerEl()!.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement;
+    if (openPanel() === null) { await act(async () => { toggle.click(); }); await settle(); }
+    const tab = Array.from(drawerEl()!.querySelectorAll('[role="tab"]'))
+      .find((node) => node.textContent?.includes(panel === 'ai' ? 'AI' : 'Library'));
+    if (tab) await act(async () => { (tab as HTMLElement).click(); });
     await settle();
   };
 
@@ -2485,9 +2507,12 @@ describe('PATCH-200 a transcript shows its next step', () => {
     await settle();
     expect(chatPosts(), 'one click is one send').toHaveLength(1);
 
-    // Close the AI panel: the embedded chat unmounts with it.
+    // Switch back to Library: the embedded chat unmounts with the AI panel.
+    // PATCH-346 removed the embedded chat's own X (the top bar owns closing),
+    // so the panel's segmented switch is how the user leaves AI.
     await act(async () => {
-      (drawerEl()!.querySelector('[data-board-ai-chat-action="close"]') as HTMLElement).click();
+      (Array.from(drawerEl()!.querySelectorAll('[role="tab"]'))
+        .find((tab) => tab.textContent?.includes('Library')) as HTMLElement).click();
     });
     await settle();
     expect(openPanel()).not.toBe('ai');
@@ -2560,13 +2585,17 @@ describe('PATCH-200 a transcript shows its next step', () => {
     expect(pane.className).not.toContain('lg:w-1/2');
   });
 
-  it('for a transcript the panel offers "← Close", not "← Back to PDFs"', async () => {
+  it('Addendum 4: no back control -- the reader closes from the top bar with a « chevrons icon', async () => {
     await openTranscript();
-    expect(drawerEl()!.textContent).toContain('← Close');
-    expect(drawerEl()!.textContent).not.toContain('← Back to PDFs');
+    expect(drawerEl()!.querySelector('[data-knowledge-library-back="true"]')).toBeNull();
+    const close = drawerEl()!.querySelector('button[aria-label="Close Knowledge reader"]') as HTMLButtonElement;
+    expect(close).not.toBeNull();
+    // The affordance is now the lucide chevrons icon, not a × glyph.
+    expect(close.querySelector('svg')).not.toBeNull();
+    expect(close.getAttribute('title')).toBe('Close reader');
   });
 
-  it('a PDF source shows no bar and keeps "← Back to PDFs"', async () => {
+  it('a PDF source shows no transcript bar', async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => (
       /\/pages$/.test(String(input))
         ? jsonResponse({
@@ -2585,8 +2614,9 @@ describe('PATCH-200 a transcript shows its next step', () => {
     } as never);
 
     expect(drawerEl()!.querySelector('[data-knowledge-transcript-next-step="true"]')).toBeNull();
-    expect(drawerEl()!.textContent).toContain('← Back to PDFs');
-    expect(drawerEl()!.textContent).not.toContain('← Close');
+    // The file card is shown instead of a back control (PATCH-346 Addendum 4).
+    expect(drawerEl()!.querySelector('[data-knowledge-library-filename="true"]')).not.toBeNull();
+    expect(drawerEl()!.querySelector('[data-knowledge-library-back="true"]')).toBeNull();
   });
 
   // ==========================================================================
@@ -2648,8 +2678,10 @@ describe('PATCH-200 a transcript shows its next step', () => {
       onBoardAiDraftContextChange: vi.fn(),
     } as never);
 
+    // The docked reader opens on Library; switch the panel to AI.
     await act(async () => {
-      (drawerEl()!.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLElement).click();
+      (Array.from(drawerEl()!.querySelectorAll('[role="tab"]'))
+        .find((tab) => tab.textContent?.includes('AI')) as HTMLElement).click();
     });
     await settle();
 

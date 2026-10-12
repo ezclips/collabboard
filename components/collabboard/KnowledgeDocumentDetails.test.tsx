@@ -15,6 +15,8 @@ import { knowledgeStandaloneHighlightIndexOf }
   from '@/lib/domain/knowledge/knowledgeStandaloneHighlightIndex';
 import type { KnowledgeSourceHighlight }
   from '@/lib/domain/knowledge/knowledgeSourceHighlight';
+import { KNOWLEDGE_TRANSCRIPT_DISCLOSURE }
+  from '@/lib/domain/knowledge/knowledgeTranscriptCitation';
 
 /**
  * PDF-R6K-H2B-C1. The reader's persistent visual authority is now the
@@ -243,18 +245,16 @@ describe('KnowledgeDocumentDetails local text search', () => {
     expect(container.textContent).not.toContain('Previous');
   });
 
-  it('keeps plain text, whitespace, and Back to PDFs behavior intact', () => {
-    const onBack = vi.fn();
+  it('keeps plain text, whitespace, and no inner HTML', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    act(() => root!.render(<KnowledgeDocumentDetails originalFilename="x.pdf" pageCount={2} pages={pages} loading={false} error={false} onBack={onBack} />));
+    act(() => root!.render(<KnowledgeDocumentDetails originalFilename="x.pdf" pageCount={2} pages={pages} loading={false} error={false} onBack={vi.fn()} />));
     expect(host.textContent).toContain('Literal [brackets] and (parentheses).');
     expect(host.querySelector('script')).toBeNull();
     expect(fs.readFileSync(path.join(process.cwd(), 'components/collabboard/KnowledgeDocumentDetails.tsx'), 'utf8')).not.toContain('dangerouslySetInnerHTML');
-    const back = Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.includes('Back to PDFs'))!;
-    act(() => back.click());
-    expect(onBack).toHaveBeenCalledOnce();
+    // PATCH-346 Addendum 4: the shared header no longer renders a back control.
+    expect(host.querySelector('[data-knowledge-library-back="true"]')).toBeNull();
   });
 });
 
@@ -3278,6 +3278,8 @@ function mountPageBacklinks(
    * unsupported layout arrives -- not a flag, an absent capability.
    */
   onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void,
+  /** PATCH-346 Addendum 1. Present only where a Library panel exists. */
+  onOpenLibrary?: () => void,
 ) {
   const onOpenBacklinkTarget = vi.fn();
   host = document.createElement('div');
@@ -3304,6 +3306,7 @@ function mountPageBacklinks(
             onBack={vi.fn()}
             onOpenBacklinkTarget={onOpenBacklinkTarget}
             onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
+            onOpenLibrary={onOpenLibrary}
           />
         </KnowledgeSourceReferenceProvider>,
       );
@@ -3641,5 +3644,56 @@ describe('a citation split into segments shares its emphasis (PDF path)', () => 
     expect(container.querySelectorAll('[data-transcript-reading-block]').length).toBe(0);
     // The gate for the PDF path: text unchanged.
     expect(pageTextRoot(container).textContent).toBe(pages[0].text);
+  });
+});
+
+describe('PATCH-346 Addendum 1: the shared header when the side panel is closed', () => {
+  const references = [sourceRef({ ...ids('r-hdr', 'note-hdr'), pageStart: 1, pageEnd: 1 })];
+  const posts = [notePost('note-hdr', 'A citing Note')];
+
+  it('renders the shared header with no tab switch and no back control (Addendum 4)', () => {
+    mountPageBacklinks(references, posts, 1);
+    expect(host!.querySelector('[data-knowledge-library-filename="true"]')?.textContent).toBe('doc.pdf');
+    expect(host!.querySelector('[role="tablist"]')).toBeNull();
+    expect(host!.querySelector('[data-knowledge-library-back="true"]')).toBeNull();
+  });
+
+  it('the note count opens the Library when onOpenLibrary is given, and the list is not duplicated', () => {
+    const onOpenLibrary = vi.fn();
+    mountPageBacklinks(references, posts, 1, pages, undefined, onOpenLibrary);
+
+    const count = host!.querySelector('[data-knowledge-library-note-count="true"]') as HTMLButtonElement;
+    expect(count.tagName).toBe('BUTTON');
+    act(() => count.click());
+    expect(onOpenLibrary).toHaveBeenCalledTimes(1);
+    // The Notes list lives in the Library panel, not here.
+    expect(host!.querySelector('[data-knowledge-used-in-notes="document"]')).toBeNull();
+  });
+
+  it('without onOpenLibrary the count is plain text and the UsedInNotes list stays', () => {
+    mountPageBacklinks(references, posts, 1);
+    const count = host!.querySelector('[data-knowledge-library-note-count="true"]')!;
+    expect(count.tagName).toBe('SPAN');
+    expect(count.textContent).toBe('used in 1 note');
+    expect(host!.querySelector('[data-knowledge-used-in-notes="document"]')).not.toBeNull();
+  });
+
+  it('keeps the transcript disclosure under the header', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(
+      <KnowledgeDocumentDetails
+        originalFilename="talk.txt"
+        pageCount={null}
+        pages={[]}
+        loading={false}
+        error={false}
+        transcriptRepresentation={{} as never}
+        onBack={vi.fn()}
+      />,
+    ));
+    expect(host!.textContent).toContain(KNOWLEDGE_TRANSCRIPT_DISCLOSURE);
+    expect(host!.querySelector('[data-knowledge-reader-kind="transcript"]')).not.toBeNull();
   });
 });

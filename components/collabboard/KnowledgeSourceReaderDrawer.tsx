@@ -1,12 +1,13 @@
 "use client";
 
 import React, { useCallback, useMemo, useEffect, useRef, useState } from 'react';
+import { ChevronsLeft } from 'lucide-react';
 import { useParams } from 'next/navigation';
 import KnowledgeDocumentDetails, {
-  UsedInNotes,
   pageCountSummary,
   type KnowledgeDocumentDetailPage,
 } from '@/components/collabboard/KnowledgeDocumentDetails';
+import KnowledgeReaderPanelHeader from '@/components/collabboard/KnowledgeReaderPanelHeader';
 import type { KnowledgeTranscriptStoredRepresentation } from '@/lib/domain/knowledge/knowledgeTranscriptVersion';
 import { useKnowledgeSourceBacklinksForDocument } from '@/components/collabboard/KnowledgeSourceReferenceContext';
 import {
@@ -937,6 +938,9 @@ export default function KnowledgeSourceReaderDrawer({
         initialSourceRequestId={reader.sourceTarget?.requestId}
         onBack={closeReader}
         hostRendersDocumentHeader={hostRendersDocumentHeader}
+        // PATCH-346 Addendum 1. Only where the Library panel exists: the
+        // closed-panel header's note-count link opens it.
+        onOpenLibrary={onOpenBacklinkTarget ? () => setSidePanelRightPanel('library') : undefined}
         onCreateNoteFromPage={onCreateNoteFromPage}
         onSaveSelectionAsNote={onSaveSelectionAsNote}
         onOpenBacklinkTarget={onOpenBacklinkTarget}
@@ -1138,10 +1142,11 @@ export default function KnowledgeSourceReaderDrawer({
           ref={closeButtonRef}
           type="button"
           aria-label="Close Knowledge reader"
+          title="Close reader"
           className="mb-1 rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
           onClick={closeReader}
         >
-          ×
+          <ChevronsLeft size={16} aria-hidden="true" />
         </button>
       </div>
       <div className="relative flex min-h-0 flex-1">
@@ -1210,45 +1215,18 @@ export default function KnowledgeSourceReaderDrawer({
                     : 'lg:w-[300px] lg:flex-none'
                 }`}
               >
-                {/*
-                  What is this source, where did it come from, and where is it
-                  used -- answered once, here, above whichever panel is open.
-                  The reading pane beside it shows the document and nothing
-                  about it, so no metadata is duplicated. Both the rows and the
-                  page phrasing are the reader's existing ones, imported rather
-                  than reimplemented.
-                */}
-                <header className="shrink-0 border-b border-gray-100 px-4 pb-2 pt-3">
-                  <button
-                    type="button"
-                    data-knowledge-library-back="true"
-                    className="mb-3 text-xs font-medium text-blue-700 hover:text-blue-900"
-                    onClick={closeReader}
-                  >
-                    {isTranscriptDocument ? '← Close' : '← Back to PDFs'}
-                  </button>
-                  <h2
-                    data-knowledge-library-filename="true"
-                    className="truncate text-sm font-medium text-gray-800"
-                    title={reader.originalFilename}
-                  >
-                    {reader.originalFilename}
-                  </h2>
-                  {libraryPageSummary !== null ? (
-                    <p data-knowledge-library-pagecount="true" className="text-[11px] text-gray-500">
-                      {libraryPageSummary}
-                    </p>
-                  ) : null}
-                  <UsedInNotes
-                    scope="document"
-                    rows={libraryBacklinkRows}
-                    onOpen={onOpenBacklinkTarget}
-                    onShowOnBoard={onRevealBacklinkTargetOnBoard}
-                  />
-                  <p data-knowledge-reader-panel-title="true" className="mt-2 text-[11px] font-semibold text-gray-700">
-                    {sidePanelRightPanel === 'library' ? 'Library' : 'AI'}
-                  </p>
-                </header>
+                {/* PATCH-346. The modern panel header: file card + segmented
+                    switch. The "Used in Notes" list lives in the Library tab's
+                    own Notes section, so only the count is here. */}
+                <KnowledgeReaderPanelHeader
+                  filename={reader.originalFilename}
+                  kind={isTranscriptDocument ? 'transcript' : reader.kind === KNOWLEDGE_TEXT_KIND ? 'text' : 'pdf'}
+                  pageSummary={libraryPageSummary}
+                  noteCount={libraryBacklinkRows.length}
+                  panel={sidePanelRightPanel === 'ai' ? 'ai' : 'library'}
+                  aiAvailable={boardAiAvailable}
+                  onSelectPanel={setSidePanelRightPanel}
+                />
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
                   {sidePanelRightPanel === 'library' ? (
                     <PdfWorkspaceLibraryPanel

@@ -146,9 +146,12 @@ async function openReader(presentation: 'side-panel' | 'workspace') {
 
   // The stub only exists once the AI panel is open.
   if (presentation !== 'workspace') {
-    const dock = document.querySelector('[data-pdf-workspace-dock="ai"]') as HTMLButtonElement;
-    expect(dock).not.toBeNull();
-    await act(async () => { dock.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    // PATCH-346 Addendum 2: the docked panel opens on Library; its AI tab
+    // switches it to AI.
+    const aiTab = Array.from(document.querySelectorAll('[role="tab"]'))
+      .find((tab) => tab.textContent?.includes('AI')) as HTMLElement;
+    expect(aiTab).not.toBeUndefined();
+    await act(async () => { aiTab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
     await settle();
   }
   expect(document.querySelector('[data-stub-board-ai="true"]')).not.toBeNull();
