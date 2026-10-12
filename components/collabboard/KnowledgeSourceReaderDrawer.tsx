@@ -947,6 +947,14 @@ export default function KnowledgeSourceReaderDrawer({
         onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
         onAddBoardAiContext={boardAiAvailable ? handOffToBoardAi : undefined}
         onActivePageChange={handleActivePageChange}
+        // PATCH-348. Hide the page-local "Notes on this page" list ONLY while
+        // the Library panel is open beside this document -- there it duplicates
+        // the panel's own Notes tab. With the panel closed or on AI it stays.
+        // Each host has its own panel state: the workspace's panel is
+        // controlled (`workspaceRightPanel`), the docked reader's is local.
+        hidePageNotes={host === 'workspace'
+          ? workspaceRightPanel === 'library'
+          : !!onOpenBacklinkTarget && sidePanelRightPanel === 'library'}
       />
     );
   };

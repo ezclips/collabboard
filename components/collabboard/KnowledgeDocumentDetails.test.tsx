@@ -3280,6 +3280,8 @@ function mountPageBacklinks(
   onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void,
   /** PATCH-346 Addendum 1. Present only where a Library panel exists. */
   onOpenLibrary?: () => void,
+  /** PATCH-348. True where the Library panel is open beside this document. */
+  hidePageNotes?: boolean,
 ) {
   const onOpenBacklinkTarget = vi.fn();
   host = document.createElement('div');
@@ -3307,6 +3309,7 @@ function mountPageBacklinks(
             onOpenBacklinkTarget={onOpenBacklinkTarget}
             onRevealBacklinkTargetOnBoard={onRevealBacklinkTargetOnBoard}
             onOpenLibrary={onOpenLibrary}
+            hidePageNotes={hidePageNotes}
           />
         </KnowledgeSourceReferenceProvider>,
       );
@@ -3446,6 +3449,26 @@ describe('the reader shows the Notes linked to the page being read', () => {
     // exactly as it did before this feature existed.
     expect(host!.querySelector('[data-knowledge-used-in-notes="page"]')).toBeNull();
     expect(host!.textContent).not.toContain('Notes on this page');
+  });
+
+  it('PATCH-348: by default the page list still shows', () => {
+    const references = [sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 })];
+    const posts = [notePost('note-a', 'Page one Note')];
+
+    mountPageBacklinks(references, posts, 1);
+    expect(pageBacklinkIds()).toEqual(['note-a']);
+  });
+
+  it('PATCH-348: hidePageNotes hides the page list but keeps the document list', () => {
+    const references = [sourceRef({ ...ids('r-a', 'note-a'), pageStart: 1, pageEnd: 1 })];
+    const posts = [notePost('note-a', 'Page one Note')];
+
+    mountPageBacklinks(references, posts, 1, pages, undefined, undefined, true);
+    // The page-local list is gone...
+    expect(host!.querySelector('[data-knowledge-used-in-notes="page"]')).toBeNull();
+    expect(host!.textContent).not.toContain('Notes on this page');
+    // ...and only that one: the document-scoped list is untouched.
+    expect(documentBacklinkIds()).toEqual(['note-a']);
   });
 });
 

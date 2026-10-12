@@ -172,6 +172,11 @@ function click(target: Element | null): void {
   });
 }
 
+/** PATCH-348. The Library's tabs are `notes | images | highlights`. */
+function selectTab(container: HTMLElement, id: 'notes' | 'images' | 'highlights'): void {
+  click(container.querySelector(`[data-pdf-workspace-library-filter="${id}"]`));
+}
+
 function imageIds(container: HTMLElement): string[] {
   return Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-workspace-library-image]'))
     .map((node) => node.dataset.pdfWorkspaceLibraryImage ?? '');
@@ -241,12 +246,17 @@ describe('PdfWorkspaceLibraryPanel', () => {
     );
     await flush();
 
+    // PATCH-348: the default tab is Notes; Images is its own tab.
     expect(noteIds(container)).toEqual(['note-a']);
+    expect(imageIds(container)).toEqual([]);
+    expect(container.textContent).not.toContain('B note');
+
+    selectTab(container, 'images');
     expect(imageIds(container)).toEqual([IMG_A1]);
     expect(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`)?.textContent).toBe('p. 1');
-    expect(container.textContent).not.toContain('B note');
     expect(imageIds(container)).not.toContain(IMG_B);
 
+    selectTab(container, 'notes');
     click(container.querySelector('[data-pdf-workspace-library-note="note-a"] button'));
     expect(openNote).toHaveBeenCalledWith('note-a');
   });
@@ -271,6 +281,7 @@ describe('PdfWorkspaceLibraryPanel', () => {
     );
     await flush();
 
+    selectTab(container, 'images');
     expect(imageIds(container)).toEqual([IMG_A1]);
     expect(container.querySelector('[data-pdf-workspace-library-panel="true"]')).not.toBeNull();
     expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
@@ -325,24 +336,28 @@ describe('PdfWorkspaceLibraryPanel', () => {
     const container = mount(<Harness />);
     click(container.querySelector('[data-testid="doc-b"]'));
     expect(noteIds(container)).toEqual(['note-b']);
-    expect(imageIds(container)).toEqual([]);
 
     secondLoad.resolve([libraryImage(IMG_B, DOC_B, 1, '2026-09-08T09:00:00.000Z')]);
     await flush();
     expect(noteIds(container)).toEqual(['note-b']);
+    selectTab(container, 'images');
     expect(imageIds(container)).toEqual([IMG_B]);
 
     firstLoad.resolve([libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')]);
     await flush();
-    expect(noteIds(container)).toEqual(['note-b']);
+    // The stale DOC_A response appears on no tab.
     expect(imageIds(container)).toEqual([IMG_B]);
+    selectTab(container, 'notes');
+    expect(noteIds(container)).toEqual(['note-b']);
 
     click(container.querySelector('[data-testid="doc-a"]'));
-    expect(noteIds(container)).toEqual(['note-a']);
+    selectTab(container, 'images');
     expect(imageIds(container)).toEqual([]);
+    selectTab(container, 'notes');
+    expect(noteIds(container)).toEqual(['note-a']);
+    selectTab(container, 'images');
     thirdLoad.resolve([libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')]);
     await flush();
-    expect(noteIds(container)).toEqual(['note-a']);
     expect(imageIds(container)).toEqual([IMG_A1]);
   });
 
@@ -391,6 +406,7 @@ describe('PdfWorkspaceLibraryPanel', () => {
 
       const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
       await flush();
+      selectTab(container, 'images');
       expect(imageIds(container)).toEqual([IMG_A1]);
       expect(errorBanner(container)).toBeNull();
       expect(retryButton(container)).toBeNull();
@@ -425,6 +441,7 @@ describe('PdfWorkspaceLibraryPanel', () => {
 
       const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
       await flush();
+      selectTab(container, 'images');
       click(container.querySelector('[data-testid="bump-invalidation"]'));
       rejectRefresh(new Error('network'));
       await flush();
@@ -454,6 +471,7 @@ describe('PdfWorkspaceLibraryPanel', () => {
 
       const container = mount(<ErrorHarness loadLibraryItems={loadLibraryItems} />);
       await flush();
+      selectTab(container, 'images');
       click(container.querySelector('[data-testid="bump-invalidation"]'));
       rejectRefresh(new Error('network'));
       await flush();
@@ -477,8 +495,9 @@ describe('PdfWorkspaceLibraryPanel', () => {
     });
   });
 
-  it('filters All, Notes, and Images without ever clearing or widening active PDF scope', async () => {
+  it('PATCH-348: three tabs -- no All -- show one section at a time, never clearing or widening active PDF scope', async () => {
     notesByDocument.set(DOC_A, [note('note-a', 'A note')]);
+    highlightsByDocument.set(DOC_A, [highlight('hl-a1', DOC_A, 2, 'the marked passage')]);
     const container = mount(
       <PdfWorkspaceLibraryPanel
         documentId={DOC_A}
@@ -491,37 +510,119 @@ describe('PdfWorkspaceLibraryPanel', () => {
     );
     await flush();
 
-    expect(noteIds(container)).toEqual(['note-a']);
-    expect(imageIds(container)).toEqual([IMG_A1]);
     const filters = Array.from(container.querySelectorAll<HTMLElement>('[data-pdf-workspace-library-filter]'))
       .map((node) => node.dataset.pdfWorkspaceLibraryFilter);
-    expect(filters).toEqual(['all', 'notes', 'images', 'highlights']);
-    expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('flex-nowrap');
-    expect(container.querySelector('[data-pdf-workspace-library-filters="true"]')?.className).toContain('overflow-x-auto');
-    expect(container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`)?.className).toContain('group');
-    expect(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`)?.className).toContain('group-hover:text-blue-700');
+    // "All" is gone, and there is no reset control to return to it.
+    expect(filters).toEqual(['notes', 'images', 'highlights']);
+    expect(container.querySelector('[data-pdf-workspace-library-filter-reset="true"]')).toBeNull();
+    const tabRow = container.querySelector('[data-pdf-workspace-library-filters="true"]')!;
+    expect(tabRow.getAttribute('role')).toBe('tablist');
+    expect(tabRow.className).toContain('flex-nowrap');
+    expect(tabRow.className).toContain('overflow-x-auto');
 
-    click(container.querySelector('[data-pdf-workspace-library-filter="notes"]'));
+    // Default: Notes only.
     expect(noteIds(container)).toEqual(['note-a']);
     expect(imageIds(container)).toEqual([]);
+    expect(highlightIds(container)).toEqual([]);
+    expect(container.querySelector('[data-pdf-workspace-library-filter="notes"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector('[data-pdf-workspace-library-filter="images"]')?.getAttribute('aria-selected')).toBe('false');
+    expect(container.querySelector('[data-pdf-workspace-library-filter="highlights"]')?.getAttribute('aria-selected')).toBe('false');
     expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
 
-    click(container.querySelector('[data-pdf-workspace-library-filter="images"]'));
+    selectTab(container, 'images');
     expect(noteIds(container)).toEqual([]);
     expect(imageIds(container)).toEqual([IMG_A1]);
     expect(imageIds(container)).not.toContain(IMG_B);
+    expect(highlightIds(container)).toEqual([]);
+    expect(container.querySelector('[data-pdf-workspace-library-filter="images"]')?.getAttribute('aria-selected')).toBe('true');
+    expect(container.querySelector(`[data-pdf-workspace-library-image-go="${IMG_A1}"]`)?.className).toContain('group');
+    expect(container.querySelector(`[data-pdf-workspace-library-image-page="${IMG_A1}"]`)?.className).toContain('group-hover:text-blue-700');
 
-    click(container.querySelector('[data-pdf-workspace-library-filter="highlights"]'));
+    selectTab(container, 'highlights');
     expect(noteIds(container)).toEqual([]);
     expect(imageIds(container)).toEqual([]);
-    expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
+    expect(highlightIds(container)).toEqual(['hl-a1']);
+    expect(container.querySelector('[data-pdf-workspace-library-filter="highlights"]')?.getAttribute('aria-selected')).toBe('true');
 
-    click(container.querySelector('[data-pdf-workspace-library-filter-reset="true"]'));
-    expect(noteIds(container)).toEqual(['note-a']);
-    expect(imageIds(container)).toEqual([IMG_A1]);
+    // The active-PDF scope is never widened or cleared by a tab switch.
+    expect(container.querySelector('[data-pdf-workspace-library-document]')?.getAttribute('data-pdf-workspace-library-document')).toBe(DOC_A);
   });
 
-  it('lists this PDF\'s standalone highlights, scoped and navigable, under their own filter', async () => {
+  it('PATCH-348: only the selected tab\'s section exists, with no uppercase section heading', async () => {
+    notesByDocument.set(DOC_A, [note('note-a', 'A note')]);
+    highlightsByDocument.set(DOC_A, [highlight('hl-a1', DOC_A, 1)]);
+    const container = mount(
+      <PdfWorkspaceLibraryPanel
+        documentId={DOC_A}
+        onOpenNote={() => {}}
+        loadLibraryItems={async () => [libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')]}
+      />,
+    );
+    await flush();
+
+    const notesSection = () => container.querySelector('[data-pdf-workspace-library-notes="true"]');
+    const imagesSection = () => container.querySelector('[data-pdf-workspace-library-images="true"]');
+    const highlightsSection = () => container.querySelector('[data-pdf-workspace-library-highlights="true"]');
+
+    expect(notesSection()).not.toBeNull();
+    expect(imagesSection()).toBeNull();
+    expect(highlightsSection()).toBeNull();
+    // The tab names it, so no uppercase heading is left inside the section.
+    expect(notesSection()?.textContent).not.toContain('NOTES');
+
+    selectTab(container, 'images');
+    expect(notesSection()).toBeNull();
+    expect(imagesSection()).not.toBeNull();
+    expect(highlightsSection()).toBeNull();
+
+    selectTab(container, 'highlights');
+    expect(notesSection()).toBeNull();
+    expect(imagesSection()).toBeNull();
+    expect(highlightsSection()).not.toBeNull();
+    expect(highlightsSection()?.textContent).not.toContain('HIGHLIGHTS');
+  });
+
+  it('PATCH-348: per-tab empty states in plain words', async () => {
+    const container = mount(
+      <PdfWorkspaceLibraryPanel documentId={DOC_A} onOpenNote={() => {}} loadLibraryItems={async () => []} />,
+    );
+    await flush();
+
+    expect(container.querySelector('[data-pdf-workspace-library-notes="true"]')?.textContent)
+      .toContain('No notes from this PDF yet.');
+
+    selectTab(container, 'images');
+    expect(container.querySelector('[data-pdf-workspace-library-images="true"]')?.textContent)
+      .toContain('No PDF-derived images for this PDF yet.');
+
+    selectTab(container, 'highlights');
+    expect(container.querySelector('[data-pdf-workspace-library-highlights="true"]')?.textContent)
+      .toContain('No highlights in this PDF yet.');
+  });
+
+  it('PATCH-348: tab counts are unchanged and always visible', async () => {
+    notesByDocument.set(DOC_A, [note('note-a', 'A'), note('note-b', 'B')]);
+    highlightsByDocument.set(DOC_A, [highlight('hl-a1', DOC_A, 1)]);
+    const container = mount(
+      <PdfWorkspaceLibraryPanel
+        documentId={DOC_A}
+        onOpenNote={() => {}}
+        loadLibraryItems={async () => [libraryImage(IMG_A1, DOC_A, 1, '2026-09-08T10:00:00.000Z')]}
+      />,
+    );
+    await flush();
+
+    const tabText = (id: string) => container.querySelector(`[data-pdf-workspace-library-filter="${id}"]`)?.textContent;
+    expect(tabText('notes')).toContain('Notes 2');
+    expect(tabText('images')).toContain('Images 1');
+    expect(tabText('highlights')).toContain('Highlights 1');
+    // The counts survive a tab switch.
+    selectTab(container, 'highlights');
+    expect(tabText('notes')).toContain('Notes 2');
+    expect(tabText('highlights')).toContain('Highlights 1');
+  });
+
+  it('lists this PDF\'s standalone highlights, scoped and navigable, under their own tab', async () => {
     highlightsByDocument.set(DOC_A, [highlight('hl-a1', DOC_A, 4, 'the marked passage')]);
     highlightsByDocument.set(DOC_B, [highlight('hl-b1', DOC_B, 2)]);
     const navigated: Array<{ documentId: string; pageNumber: number }> = [];
@@ -535,12 +636,10 @@ describe('PdfWorkspaceLibraryPanel', () => {
     );
     await flush();
 
+    selectTab(container, 'highlights');
     // Active-PDF scope is mandatory: another document's highlight is absent.
     expect(highlightIds(container)).toEqual(['hl-a1']);
     expect(container.textContent).toContain('the marked passage');
-
-    click(container.querySelector('[data-pdf-workspace-library-filter="highlights"]'));
-    expect(highlightIds(container)).toEqual(['hl-a1']);
     expect(container.querySelector('[data-pdf-workspace-library-filter="highlights"]')?.textContent).toContain('1');
 
     click(container.querySelector('[data-pdf-workspace-library-highlight="hl-a1"] button'));

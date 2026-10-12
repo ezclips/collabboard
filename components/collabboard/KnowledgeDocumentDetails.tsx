@@ -191,6 +191,8 @@ export interface KnowledgeDocumentDetailsProps {
   onRevealBacklinkTargetOnBoard?: (targetPadletId: string) => void;
   /** PATCH-346 Addendum 1. Opens the Library panel; absent -> UsedInNotes stays. */
   onOpenLibrary?: () => void;
+  /** PATCH-348. Hides "Notes on this page" where the Library panel duplicates it. */
+  hidePageNotes?: boolean;
 }
 
 /**
@@ -634,6 +636,7 @@ export default function KnowledgeDocumentDetails({
   initialSourceRequestId,
   onOpenBacklinkTarget,
   onRevealBacklinkTargetOnBoard, onOpenLibrary,
+  hidePageNotes = false,
 }: KnowledgeDocumentDetailsProps) {
   const [query, setQuery] = useState('');
   const [activeMatchIndex, setActiveMatchIndex] = useState(0);
@@ -1774,14 +1777,16 @@ export default function KnowledgeDocumentDetails({
       */}
       {/* The same reading column as the page and the toolbar above, so the
           list starts where the PDF starts instead of at the pane's edge. */}
-      <div className="mx-auto w-full max-w-4xl">
-        <UsedInNotes
-          scope="page"
-          rows={activePageRows}
-          onOpen={onOpenBacklinkTarget}
-          onShowOnBoard={onRevealBacklinkTargetOnBoard}
-        />
-      </div>
+      {hidePageNotes ? null : (
+        <div className="mx-auto w-full max-w-4xl">
+          <UsedInNotes
+            scope="page"
+            rows={activePageRows}
+            onOpen={onOpenBacklinkTarget}
+            onShowOnBoard={onRevealBacklinkTargetOnBoard}
+          />
+        </div>
+      )}
 
       {/*
         Text Phase 1 -- the ONE floating selection toolbar, a SIBLING of the

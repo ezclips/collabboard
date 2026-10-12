@@ -159,6 +159,8 @@ describe('mounted PDF workspace image navigation wiring', () => {
     const onActivePageChange = vi.fn();
     await mountWorkspace(onActivePageChange);
     onActivePageChange.mockClear();
+    // PATCH-348: the Library opens on Notes; Images is its own tab.
+    await click(document.querySelector('[data-pdf-workspace-library-filter="images"]'));
     const workspace = document.querySelector('[data-pdf-workspace="true"]')!;
     const panel = workspace.querySelector('[data-pdf-workspace-library-panel="true"]');
     const preview = workspace.querySelector(`[data-pdf-workspace-library-image-preview="${IMAGE_A}"]`);

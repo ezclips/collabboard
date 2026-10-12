@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Crosshair, RotateCcw } from 'lucide-react';
+import { Crosshair } from 'lucide-react';
 import {
   useKnowledgeSourceNoteSummariesForDocument,
   useKnowledgeStandaloneHighlights,
@@ -28,10 +28,14 @@ import type { KnowledgeSourceNoteSummary } from '@/lib/domain/knowledge/knowledg
  * "AI Notes" type either -- a Note saved from an AI answer is an ordinary
  * source-linked Note and appears under Notes with the rest.
  */
-export type PdfWorkspaceLibraryFilter = 'all' | 'notes' | 'images' | 'highlights';
+export type PdfWorkspaceLibraryFilter = 'notes' | 'images' | 'highlights';
 
+/**
+ * PATCH-348. Three TABS, not filters: "All" is gone, one tab is always
+ * selected, and only its content is shown. The default is Notes -- the list a
+ * reader reaches for first on a PDF.
+ */
 const FILTERS: ReadonlyArray<{ id: PdfWorkspaceLibraryFilter; label: string }> = [
-  { id: 'all', label: 'All' },
   { id: 'notes', label: 'Notes' },
   { id: 'images', label: 'Images' },
   { id: 'highlights', label: 'Highlights' },
@@ -253,7 +257,7 @@ export default function PdfWorkspaceLibraryPanel({
   // this panel instance's own request, scoped to whatever `documentId` it
   // closes over at click time, and must never notify any other mounted panel.
   const [retryToken, setRetryToken] = useState(0);
-  const [filter, setFilter] = useState<PdfWorkspaceLibraryFilter>('all');
+  const [filter, setFilter] = useState<PdfWorkspaceLibraryFilter>('notes');
   const [imageState, setImageState] = useState<ImageState>({
     documentId,
     loading: true,
@@ -305,18 +309,8 @@ export default function PdfWorkspaceLibraryPanel({
   const images = imageState.documentId === documentId ? imageState.images : [];
   const imagesLoading = imageState.documentId === documentId && imageState.loading;
   const imagesError = imageState.documentId === documentId && imageState.error;
-  const showNotes = filter === 'all' || filter === 'notes';
-  const showImages = filter === 'all' || filter === 'images';
-  const showHighlights = filter === 'all' || filter === 'highlights';
-  const empty = filter === 'all'
-    && !imagesLoading
-    && !imagesError
-    && notes.length === 0
-    && images.length === 0
-    && highlights.length === 0;
 
   const filterCounts = useMemo(() => ({
-    all: notes.length + images.length + highlights.length,
     notes: notes.length,
     images: images.length,
     highlights: highlights.length,
@@ -324,42 +318,30 @@ export default function PdfWorkspaceLibraryPanel({
 
   return (
     <div data-pdf-workspace-library-panel="true" data-pdf-workspace-library-document={documentId}>
-      <div data-pdf-workspace-library-filters="true" className="mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
+      <div data-pdf-workspace-library-filters="true" role="tablist" className="mb-3 flex flex-nowrap items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none]">
         {FILTERS.map((entry) => (
           <button
             key={entry.id}
             type="button"
+            role="tab"
             data-pdf-workspace-library-filter={entry.id}
-            aria-pressed={filter === entry.id}
+            aria-selected={filter === entry.id}
             className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
               filter === entry.id
                 ? 'bg-blue-600 text-white'
-                : 'bg-slate-100 text-gray-500 hover:bg-slate-200 hover:text-gray-700'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800'
             }`}
             onClick={() => setFilter(entry.id)}
           >
             {entry.label} {filterCounts[entry.id]}
           </button>
         ))}
-        {filter !== 'all' ? (
-          <button
-            type="button"
-            data-pdf-workspace-library-filter-reset="true"
-            title="Reset filter"
-            aria-label="Reset Library filter"
-            className="ml-auto rounded-full p-1 text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300"
-            onClick={() => setFilter('all')}
-          >
-            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        ) : null}
       </div>
 
-      {showNotes ? (
-        <section data-pdf-workspace-library-notes="true" className="mb-4">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Notes</p>
+      {filter === 'notes' ? (
+        <section data-pdf-workspace-library-notes="true">
           {notes.length === 0 ? (
-            <p className="text-[11px] text-gray-500">No notes for this PDF yet.</p>
+            <p className="text-[11px] text-gray-500">No notes from this PDF yet.</p>
           ) : (
             <ul className="space-y-1.5">
               {notes.map((note) => (
@@ -376,9 +358,8 @@ export default function PdfWorkspaceLibraryPanel({
         </section>
       ) : null}
 
-      {showImages ? (
+      {filter === 'images' ? (
         <section data-pdf-workspace-library-images="true">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Images</p>
           {imagesLoading && images.length === 0 ? (
             <p data-pdf-workspace-library-images-loading="true" className="text-[11px] text-gray-500">
               Loading images…
@@ -428,11 +409,10 @@ export default function PdfWorkspaceLibraryPanel({
         </section>
       ) : null}
 
-      {showHighlights ? (
-        <section data-pdf-workspace-library-highlights="true" className="mt-4">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">Highlights</p>
+      {filter === 'highlights' ? (
+        <section data-pdf-workspace-library-highlights="true">
           {highlights.length === 0 ? (
-            <p className="text-[11px] text-gray-500">No highlights on this PDF yet.</p>
+            <p className="text-[11px] text-gray-500">No highlights in this PDF yet.</p>
           ) : (
             <ul className="space-y-1.5">
               {highlights.map((highlight) => (
@@ -446,12 +426,6 @@ export default function PdfWorkspaceLibraryPanel({
             </ul>
           )}
         </section>
-      ) : null}
-
-      {empty ? (
-        <p data-pdf-workspace-library-empty="true" className="mt-3 text-[11px] text-gray-500">
-          Nothing in the Library for this PDF yet.
-        </p>
       ) : null}
     </div>
   );

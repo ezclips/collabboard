@@ -680,6 +680,13 @@ describe('P6J-F7-B1 board-adjacent reader drawer', () => {
 
     await mount({ documentOpenRequest: docRequest(1), onOpenBacklinkTarget: onOpen }, [exactReference()]);
 
+    // PATCH-348: with the Library panel open the page-local list is hidden (it
+    // duplicates the panel). Close the panel so the Used in Notes rows show.
+    await act(async () => {
+      (drawerEl()!.querySelector('[data-pdf-workspace-dock="toggle"]') as HTMLElement).click();
+    });
+    await settle();
+
     const row = drawerEl()!.querySelector('[data-knowledge-backlink-target="padlet-1"] button') as HTMLButtonElement;
     expect(row).not.toBeNull();
     await act(async () => { row.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
@@ -1117,6 +1124,53 @@ describe('the docked reader docks Library and AI beside the PDF', () => {
     expect(drawerEl()!.textContent).toContain(PAGE_ONE);
     // One /pages read for the whole session: switching panels re-reads nothing.
     expect(pageRequests()).toHaveLength(1);
+  });
+
+  it('PATCH-348: hides "Notes on this page" only while the Library tab is open', async () => {
+    withPages();
+    // A page-1 citation, so the page-scoped list has something to render.
+    const pageNote = {
+      id: 'ref-page-note',
+      targetPadletId: 'padlet-1',
+      sourceDocumentId: SOURCE_A,
+      pageStart: 1,
+      pageEnd: 1,
+      quoteText: null,
+      quoteHash: null,
+      charStart: null,
+      charEnd: null,
+      locator: null,
+      createdAt: '2026-08-24T00:00:00.000Z',
+    } as unknown as SourceReference;
+    await mount({
+      documentOpenRequest: docRequest(1),
+      onOpenBacklinkTarget: vi.fn(),
+      onCreateNoteFromPage: vi.fn(),
+      boardAiDraftContextByDocumentId: {},
+      onBoardAiDraftContextChange: vi.fn(),
+    } as never, [pageNote]);
+
+    const pageNotes = () => drawerEl()!.querySelector('[data-knowledge-used-in-notes="page"]');
+
+    // Library is open by default: the page list duplicates its Notes tab.
+    expect(openPanel()).toBe('library');
+    expect(pageNotes()).toBeNull();
+
+    // On AI it stays -- the panel is not showing the Notes list.
+    await clickDock('ai');
+    expect(openPanel()).toBe('ai');
+    expect(pageNotes()).not.toBeNull();
+
+    // Panel closed: it stays, the only place those page-local Notes show.
+    await clickToggle();
+    expect(openPanel()).toBeNull();
+    expect(pageNotes()).not.toBeNull();
+
+    // Back on Library: hidden again.
+    await clickToggle();
+    await clickDock('library');
+    expect(openPanel()).toBe('library');
+    expect(pageNotes()).toBeNull();
   });
 
   it('mounts no AI tab at all where Board AI is unavailable', async () => {
@@ -2139,6 +2193,12 @@ describe('the reveal intent belongs to one navigation', () => {
     if (tab) await act(async () => { (tab as HTMLElement).click(); });
     await settle();
   };
+  // PATCH-348: the Library's inner tabs (notes | images | highlights).
+  const clickLibraryTab = async (id: 'notes' | 'images' | 'highlights') => {
+    const tab = drawerEl()!.querySelector(`[data-pdf-workspace-library-filter="${id}"]`) as HTMLElement;
+    await act(async () => { tab.dispatchEvent(new MouseEvent('click', { bubbles: true })); });
+    await settle();
+  };
 
   let scrolls: string[] = [];
   let originalScrollIntoView: unknown;
@@ -2184,6 +2244,7 @@ describe('the reveal intent belongs to one navigation', () => {
     expect(openPanel()).toBe('library');
 
     // 4. An ORDINARY jump from that Library -- a highlight row for page 2.
+    await clickLibraryTab('highlights');
     const highlight = drawerEl()!.querySelector('[data-pdf-workspace-library-highlight] button') as HTMLElement;
     expect(highlight, 'the Library must offer a highlight to jump from').not.toBeNull();
     scrolls = [];
@@ -2220,6 +2281,7 @@ describe('the reveal intent belongs to one navigation', () => {
     // Reopen Library there, then jump within B the ordinary way.
     await clickDock('library');
     expect(openPanel()).toBe('library');
+    await clickLibraryTab('highlights');
     const highlight = drawerEl()!.querySelector('[data-pdf-workspace-library-highlight] button') as HTMLElement;
     expect(highlight).not.toBeNull();
     scrolls = [];

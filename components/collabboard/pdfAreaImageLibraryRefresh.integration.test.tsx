@@ -97,6 +97,14 @@ function imageIds(container: HTMLElement): string[] {
     .map((node) => node.dataset.pdfWorkspaceLibraryImage ?? '');
 }
 
+/** PATCH-348. Images are their own tab now; the default is Notes. */
+function selectImages(container: HTMLElement): void {
+  act(() => {
+    (container.querySelector('[data-pdf-workspace-library-filter="images"]') as HTMLElement)
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+  });
+}
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
@@ -132,6 +140,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
       <Harness documentId={DOC_A} invalidation={{}} loadLibraryItems={loader} />,
     );
     await flush();
+    selectImages(container);
     expect(imageIds(container)).toEqual([]);
     expect(loader).toHaveBeenCalledTimes(1);
 
@@ -158,6 +167,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
       <Harness documentId={DOC_A} invalidation={{}} loadLibraryItems={loader} />,
     );
     await flush();
+    selectImages(container);
     expect(imageIds(container)).toEqual([IMG_1]);
 
     act(() => {
@@ -181,6 +191,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
       <Harness documentId={DOC_A} invalidation={invalidation} loadLibraryItems={loader} />,
     );
     await flush();
+    selectImages(container);
     expect(loader).toHaveBeenCalledTimes(1);
 
     // Five re-renders with the SAME invalidation value -- standing in for
@@ -210,6 +221,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
     const { root, container } = mount(
       <Harness documentId={DOC_A} invalidation={{}} loadLibraryItems={loader} />,
     );
+    selectImages(container);
 
     // Switch to DOC_B before DOC_A's request resolves -- exactly the ordering
     // an eager user click produces.
@@ -238,6 +250,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
       <Harness documentId={DOC_A} invalidation={{}} loadLibraryItems={loader} />,
     );
     await flush();
+    selectImages(container);
     expect(imageIds(container)).toEqual([IMG_1]);
   });
 
@@ -247,6 +260,7 @@ describe('PDF_AREA_IMAGE_LIBRARY_REFRESH_CORRECTION_1: real provider + panel int
       <Harness documentId={DOC_A} invalidation={{ [DOC_A]: 1 }} loadLibraryItems={loader} />,
     );
     await flush();
+    selectImages(container);
     expect(imageIds(container)).toEqual([IMG_1]);
 
     // A retry of an idempotent creation bumps the counter again for the SAME
