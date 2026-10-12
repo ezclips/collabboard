@@ -9,6 +9,7 @@ import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
 import type { PlanId } from '@/lib/domain/billing/plans';
 import { effectivePlanId, formatPlanPrice } from '@/lib/domain/billing/plans';
 import { formatBillingDate } from '@/lib/domain/billing/formatBillingDate';
+import { AiUsageHistoryDialog } from '@/components/billing/AiUsageHistoryDialog';
 import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole, SubscriptionStatus } from '@/types/permissions';
@@ -126,6 +127,9 @@ export default function BillingPage() {
     const [usage, setUsage] = useState<BillingUsage | null>(null);
     const [usageLoading, setUsageLoading] = useState(true);
     const [usageFailed, setUsageFailed] = useState(false);
+    // PATCH-344. The AI usage history dialog (the button, the state and the
+    // element live here; everything else is in the new files).
+    const [usageHistoryOpen, setUsageHistoryOpen] = useState(false);
 
     const onPaidPlan = effectivePlanId(currentPlan, currentStatus) !== 'free';
     const canManageBilling = workspaceRole === 'owner' || workspaceRole === 'admin';
@@ -383,6 +387,14 @@ export default function BillingPage() {
                                     label={`AI credits: ${usage.credits.used} of ${usage.credits.total} used`}
                                 />
                             )}
+                            <button
+                                type="button"
+                                data-billing-view-usage="true"
+                                onClick={() => setUsageHistoryOpen(true)}
+                                className="mt-2 text-xs font-medium text-gray-600 underline hover:text-gray-900"
+                            >
+                                View usage
+                            </button>
                         </div>
 
                         <div>
@@ -526,6 +538,8 @@ export default function BillingPage() {
                     <ExternalLink className="w-4 h-4" />
                 </a>
             </div>
+
+            <AiUsageHistoryDialog isOpen={usageHistoryOpen} onClose={() => setUsageHistoryOpen(false)} />
         </div>
     );
 }

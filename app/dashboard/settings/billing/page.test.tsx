@@ -226,4 +226,16 @@ describe('PATCH-191 — the usage meters', () => {
     expect(text()).toContain('Premium');
     expect(usageSection().querySelectorAll('[role="meter"]')).toHaveLength(0);
   });
+
+  it('PATCH-344: "View usage" opens the AI usage history dialog', async () => {
+    await renderEntitled({ plan: 'pro', status: 'active', trialEndsAt: null });
+
+    const button = container.querySelector('[data-billing-view-usage="true"]') as HTMLButtonElement | null;
+    expect(button).not.toBeNull();
+    expect(container.querySelector('[data-ai-usage-history="true"]')).toBeNull();
+
+    await act(async () => { button!.click(); });
+    await flush();
+    expect(document.querySelector('[data-ai-usage-history="true"]')).not.toBeNull();
+  });
 });
