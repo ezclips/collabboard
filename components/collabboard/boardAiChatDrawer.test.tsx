@@ -31,6 +31,10 @@ const DRAWER = read('components/collabboard/BoardAiChatDrawer.tsx');
 const READER = read('components/collabboard/KnowledgeSourceReaderDrawer.tsx');
 const CLIENT = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
 
+// The AI credit bar (PATCH-343) has no React binding of its own; the classic
+// JSX transform in vitest resolves React from the global.
+(globalThis as unknown as { React?: typeof React }).React = React;
+
 let root: Root | null = null;
 let host: HTMLElement;
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -56,6 +60,8 @@ function stubChat(options: {
   threads?: ReturnType<typeof summary>[];
   messages?: Record<string, unknown[]>;
   post?: () => Response;
+  /** PATCH-343. The credits-bar GET's body (default: none, so the bar is hidden). */
+  credits?: unknown;
 } = {}) {
   const threads = [...(options.threads ?? [])];
   const messages: Record<string, unknown[]> = { ...(options.messages ?? {}) };
@@ -63,6 +69,8 @@ function stubChat(options: {
   posted = [];
   fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
+    // PATCH-343: the AI credit bar's own GET, kept out of the chat call counts.
+    if (url.includes('/ai/credits')) return json(options.credits ?? {});
     // PATCH-164: the sibling starter-questions route, answered separately so a
     // document-scoped panel's question fetch is never counted as a chat turn.
     if (url.endsWith('/starter-questions')) return json({ questions: [] });
@@ -88,6 +96,9 @@ function stubChat(options: {
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
+
+/** Every fetch that is NOT the PATCH-343 credit bar's own GET. */
+const chatCalls = () => fetchMock.mock.calls.filter(([url]) => !String(url).includes('/ai/credits'));
 
 async function mount(props: Partial<React.ComponentProps<typeof BoardAiChatDrawer>> = {}) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -130,10 +141,10 @@ afterEach(async () => {
 describe('17-18. opening reads, and never writes', () => {
   it('17. opening the drawer creates no thread', async () => {
     await mount();
-    // Exactly one GET, and no POST: a thread row appears only when a message
-    // is actually sent.
-    expect(fetchMock.mock.calls).toHaveLength(1);
-    expect(fetchMock.mock.calls[0][1]?.method).toBe('GET');
+    // Exactly one CHAT GET (the credits bar's own GET is separate), and no POST:
+    // a thread row appears only when a message is actually sent.
+    expect(chatCalls()).toHaveLength(1);
+    expect(chatCalls()[0][1]?.method ?? 'GET').toBe('GET');
     expect(q('[data-board-ai-chat-empty="true"]')).not.toBeNull();
   });
 
@@ -145,7 +156,8 @@ describe('17-18. opening reads, and never writes', () => {
     await mount();
     expect(host.textContent).toContain('newest thread');
     // The head of the server's order, not a client re-sort.
-    expect(String(fetchMock.mock.calls[1][0])).toContain(THREAD_B);
+    const threadCall = fetchMock.mock.calls.find(([url]) => String(url).includes('threadId='))!;
+    expect(String(threadCall[0])).toContain(THREAD_B);
   });
 
   it('a private, non-claiming empty state', async () => {
@@ -886,7 +898,8 @@ describe('PDF workspace document-scoped mode', () => {
     await render(DOC_A, 'Alpha.pdf', 'ai');
     expect(host.textContent).toContain('question for A');
     expect(fetchMock.mock.calls.length).toBeGreaterThan(readsBeforeClose);
-    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain(`threadId=${THREAD_A}`);
+    const threadCall = fetchMock.mock.calls.filter(([url]) => String(url).includes('threadId=')).at(-1)!;
+    expect(String(threadCall[0])).toContain(`threadId=${THREAD_A}`);
   });
 
   it('closing the PDF AI dock is not New chat', async () => {
@@ -1785,5 +1798,44 @@ describe('PATCH-164 starter questions', () => {
 
     expect(chatPosts).toHaveLength(1);
     expect(chatPosts[0].message).toBe('a typed question');
+  });
+});
+
+describe('PATCH-343 the AI credit bar', () => {
+  const proCredits = {
+    planId: 'pro',
+    credits: { used: 500, total: 2000, remaining: 1500, renewsOn: '2026-10-25T17:35:45.000Z' },
+    ownKey: false,
+  };
+
+  it('renders above the composer input', async () => {
+    stubChat({ credits: proCredits });
+    await mount();
+    const bar = q('[data-ai-credit-bar="ok"]');
+    expect(bar).not.toBeNull();
+    const input = q('[data-board-ai-chat-input="true"]')!;
+    expect(bar!.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('refreshes once after a send settles', async () => {
+    stubChat({ credits: proCredits });
+    await mount();
+    const creditsGets = () => fetchMock.mock.calls.filter(([url]) => String(url).includes('/ai/credits')).length;
+    const before = creditsGets();
+    await type('hello');
+    await click('[data-board-ai-chat-action="send"]');
+    expect(creditsGets()).toBe(before + 1);
+  });
+
+  it('a closed drawer makes no credits request; opening it makes exactly one', async () => {
+    stubChat({ credits: proCredits });
+    const creditsGets = () => fetchMock.mock.calls.filter(([url]) => String(url).includes('/ai/credits')).length;
+
+    await mount({ isOpen: false });
+    expect(creditsGets()).toBe(0);
+
+    await act(async () => { root!.render(<BoardAiChatDrawer boardId={BOARD_ID} isOpen onClose={vi.fn()} />); });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(creditsGets()).toBe(1);
   });
 });

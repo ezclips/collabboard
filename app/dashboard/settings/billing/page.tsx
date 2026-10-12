@@ -5,9 +5,10 @@ import { Check, ExternalLink, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getBoardLimitForEntitlements, getPermissionContext } from '@/lib/auth/permissions';
-import { PLANS, PLAN_ORDER, PLAN_RENEWAL_DATE_FORMAT } from '@/lib/domain/billing/plans';
+import { PLANS, PLAN_ORDER } from '@/lib/domain/billing/plans';
 import type { PlanId } from '@/lib/domain/billing/plans';
 import { effectivePlanId, formatPlanPrice } from '@/lib/domain/billing/plans';
+import { formatBillingDate } from '@/lib/domain/billing/formatBillingDate';
 import { formatBytes } from '@/lib/domain/storage/uploadLimits';
 import { useSupabase } from '@/lib/supabase-provider';
 import type { WorkspaceRole, SubscriptionStatus } from '@/types/permissions';
@@ -21,11 +22,6 @@ interface BillingUsage {
     credits: { used: number; total: number; remaining: number; renewsOn: string | null };
     documents: { used: number; limit: number | null };
     boards: { used: number; limit: number | null };
-}
-
-/** PATCH-191. The ONE date spelling, shared with the refusal text. */
-function formatBillingDate(iso: string): string {
-    return PLAN_RENEWAL_DATE_FORMAT.format(new Date(iso));
 }
 
 /** A bounded percentage, 0 at no limit. */

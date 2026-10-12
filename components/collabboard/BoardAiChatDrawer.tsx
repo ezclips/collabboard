@@ -5,6 +5,8 @@ import { BookOpen, Bot, Check, FilePlus2, FileText, Loader2, MessageSquarePlus, 
 
 import BoardAiChatModelChooser from '@/components/collabboard/BoardAiChatModelChooser';
 import BoardAiMarkdown from '@/components/collabboard/BoardAiMarkdown';
+import { AiCreditBar } from '@/components/billing/AiCreditBar';
+import { useBoardAiCredits } from '@/lib/hooks/useBoardAiCredits';
 import {
   BoardAiChatDraftChips,
   BoardAiChatPersistedChips,
@@ -538,6 +540,9 @@ export default function BoardAiChatDrawer({
   const draft = documentScopeId ? documentSession.draft : boardDraft;
   const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
   const sending = documentScopeId ? documentSession.sending : boardSending;
+  // PATCH-343. The board owner's AI credit bar (wiring only). Gated on isOpen,
+  // so a closed drawer -- mounted with every board -- makes no credits request.
+  const credits = useBoardAiCredits(isOpen ? boardId : null);
   const error = documentScopeId ? documentSession.error : boardError;
   const errorPlansLink = documentScopeId
     ? documentSession.errorPlansLink === true
@@ -1537,6 +1542,9 @@ export default function BoardAiChatDrawer({
       if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       setError('Could not reach Board AI.');
     } finally {
+      // PATCH-343. Refresh the credit bar once per settled chat POST (success,
+      // 402 refusal or error).
+      credits.refresh();
       if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
       setSending(false);
     }
@@ -2282,6 +2290,9 @@ export default function BoardAiChatDrawer({
             </div>
           ) : null}
         </div>
+
+        {/* PATCH-343. The board owner's credit bar, directly above the composer. */}
+        <AiCreditBar data={credits.data} />
 
         <div className="flex items-end gap-1.5">
           <textarea

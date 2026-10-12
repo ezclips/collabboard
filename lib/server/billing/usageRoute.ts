@@ -61,7 +61,7 @@ const UNAVAILABLE = "Usage is unavailable right now.";
  * and NO renewal: it has no credit period to renew. The page renders "No AI on
  * Free" from `planId`, not from these numbers.
  */
-function creditMeter(
+export function creditMeter(
   plan: BoardPlan,
   balance: AiCreditBalance,
 ): BillingUsageResponse["credits"] {
