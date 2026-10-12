@@ -7,6 +7,10 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { KnowledgeReaderPanelHeader } from './KnowledgeReaderPanelHeader';
+import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_TEXT_BUTTON_CLASS,
+} from './knowledgeReaderControls';
 
 (globalThis as unknown as { React?: typeof React }).React = React;
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -98,6 +102,20 @@ describe('PATCH-346 KnowledgeReaderPanelHeader', () => {
 
     await act(async () => { ai.click(); });
     expect(onSelectPanel).toHaveBeenCalledWith('ai');
+  });
+
+  it('PATCH-349: the switch uses the reader\'s ONE small text-button shape', async () => {
+    await render({ panel: 'library' });
+    const [library, ai] = tabs();
+    // Same h-6/rounded/border tokens as the top-bar toggle, active = the tint.
+    expect(library.className).toBe(KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    expect(ai.className).toBe(KNOWLEDGE_TEXT_BUTTON_CLASS);
+    expect(library.className).toContain('h-6');
+    expect(library.className).not.toContain('rounded-full');
+    expect(library.className).not.toContain('py-1.5');
+    // The icons are the shared compact size, not 14px.
+    expect(library.querySelector('svg')?.getAttribute('class')).toContain('h-3.5');
+    expect(ai.querySelector('svg')?.getAttribute('class')).toContain('h-3.5');
   });
 
   it('reports the active panel name on the switch', async () => {

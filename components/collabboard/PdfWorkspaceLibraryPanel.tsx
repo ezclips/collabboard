@@ -3,6 +3,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Crosshair } from 'lucide-react';
 import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_TEXT_BUTTON_CLASS,
+} from '@/components/collabboard/knowledgeReaderControls';
+import {
   useKnowledgeSourceNoteSummariesForDocument,
   useKnowledgeStandaloneHighlights,
   useKnowledgePdfAreaImageInvalidation,
@@ -326,11 +330,9 @@ export default function PdfWorkspaceLibraryPanel({
             role="tab"
             data-pdf-workspace-library-filter={entry.id}
             aria-selected={filter === entry.id}
-            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 ${
-              filter === entry.id
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 hover:text-gray-800'
-            }`}
+            className={filter === entry.id
+              ? KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE
+              : KNOWLEDGE_TEXT_BUTTON_CLASS}
             onClick={() => setFilter(entry.id)}
           >
             {entry.label} {filterCounts[entry.id]}

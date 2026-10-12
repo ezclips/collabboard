@@ -6,6 +6,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import PdfWorkspaceLibraryPanel from './PdfWorkspaceLibraryPanel';
+import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_TEXT_BUTTON_CLASS,
+} from './knowledgeReaderControls';
 import { selectPdfWorkspaceLibraryImages } from '@/lib/domain/canvas/pdfWorkspaceLibraryImages';
 import type { LibraryItem } from '@/lib/collabboard/library';
 import type { KnowledgeSourceNoteSummary } from '@/lib/domain/knowledge/knowledgeSourceNoteSummary';
@@ -519,6 +523,15 @@ describe('PdfWorkspaceLibraryPanel', () => {
     expect(tabRow.getAttribute('role')).toBe('tablist');
     expect(tabRow.className).toContain('flex-nowrap');
     expect(tabRow.className).toContain('overflow-x-auto');
+
+    // PATCH-349: the tabs use the reader's ONE small text-button shape, active
+    // state being the shared tint -- not a rounded-full pill.
+    const notesTab = container.querySelector('[data-pdf-workspace-library-filter="notes"]')!;
+    expect(notesTab.className).toBe(KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
+    expect(container.querySelector('[data-pdf-workspace-library-filter="images"]')?.className)
+      .toBe(KNOWLEDGE_TEXT_BUTTON_CLASS);
+    expect(notesTab.className).toContain('h-6');
+    expect(notesTab.className).not.toContain('rounded-full');
 
     // Default: Notes only.
     expect(noteIds(container)).toEqual(['note-a']);

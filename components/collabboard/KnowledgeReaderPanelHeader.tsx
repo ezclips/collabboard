@@ -11,6 +11,11 @@
  */
 import React from 'react';
 import { FileText, Library, Sparkles } from 'lucide-react';
+import {
+  KNOWLEDGE_CONTROL_ACTIVE_BLUE,
+  KNOWLEDGE_ICON_SIZE_CLASS,
+  KNOWLEDGE_TEXT_BUTTON_CLASS,
+} from '@/components/collabboard/knowledgeReaderControls';
 
 export type KnowledgeReaderPanel = 'library' | 'ai';
 export type KnowledgeReaderDocumentKind = 'pdf' | 'transcript' | 'text';
@@ -37,9 +42,6 @@ interface KnowledgeReaderPanelHeaderProps {
   onSelectPanel?: (panel: KnowledgeReaderPanel) => void;
 }
 
-const TAB_ACTIVE = 'bg-white shadow-sm text-gray-900 font-medium';
-const TAB_IDLE = 'text-gray-500 hover:text-gray-800';
-
 export interface KnowledgeReaderPanelSwitchProps {
   panel: KnowledgeReaderPanel;
   aiAvailable: boolean;
@@ -57,18 +59,18 @@ export function KnowledgeReaderPanelSwitch({ panel, aiAvailable, onSelectPanel }
     <div
       role="tablist"
       data-knowledge-reader-panel-title={panel === 'library' ? 'Library' : 'AI'}
-      className="flex w-full rounded-lg bg-gray-100 p-0.5"
+      className="flex items-center gap-1"
     >
       <button
         type="button"
         role="tab"
         aria-selected={panel === 'library'}
         onClick={() => onSelectPanel?.('library')}
-        className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${
-          panel === 'library' ? TAB_ACTIVE : TAB_IDLE
-        }`}
+        className={panel === 'library'
+          ? KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE
+          : KNOWLEDGE_TEXT_BUTTON_CLASS}
       >
-        <Library size={14} aria-hidden="true" />
+        <Library className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />
         Library
       </button>
       {aiAvailable ? (
@@ -77,11 +79,11 @@ export function KnowledgeReaderPanelSwitch({ panel, aiAvailable, onSelectPanel }
           role="tab"
           aria-selected={panel === 'ai'}
           onClick={() => onSelectPanel?.('ai')}
-          className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm ${
-            panel === 'ai' ? TAB_ACTIVE : TAB_IDLE
-          }`}
+          className={panel === 'ai'
+            ? KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE
+            : KNOWLEDGE_TEXT_BUTTON_CLASS}
         >
-          <Sparkles size={14} aria-hidden="true" />
+          <Sparkles className={KNOWLEDGE_ICON_SIZE_CLASS} aria-hidden="true" />
           AI
         </button>
       ) : null}

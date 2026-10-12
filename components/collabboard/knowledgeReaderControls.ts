@@ -21,6 +21,18 @@ export const KNOWLEDGE_ICON_BUTTON_CLASS =
 export const KNOWLEDGE_ICON_SIZE_CLASS = 'h-3.5 w-3.5';
 
 /**
+ * PATCH-349. The reader's ONE text-button shape, sized to the icon button
+ * above it: same `h-6`, radius, border, hover and focus tokens, so the top-bar
+ * toggle, the Library | AI switch and the Library's tabs read as one family.
+ * Active state is the tint below, exactly as for the icon button.
+ */
+export const KNOWLEDGE_TEXT_BUTTON_CLASS =
+  'inline-flex h-6 shrink-0 items-center gap-1 rounded border border-gray-200 '
+  + 'px-2 text-[11px] font-medium text-gray-600 hover:bg-gray-50 hover:text-gray-900 '
+  + 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-blue-400 '
+  + 'disabled:cursor-not-allowed disabled:opacity-40';
+
+/**
  * The active tints, in each surface's own colour: blue is the reader's
  * existing "this control is on" (search, Select area), and purple is Board
  * AI's, the same purple the AI panel uses.

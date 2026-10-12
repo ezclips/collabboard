@@ -18,6 +18,7 @@ import {
 import {
   KNOWLEDGE_CONTROL_ACTIVE_BLUE,
   KNOWLEDGE_ICON_BUTTON_CLASS,
+  KNOWLEDGE_TEXT_BUTTON_CLASS,
 } from './knowledgeReaderControls';
 
 vi.mock('@/components/collabboard/KnowledgePdfUploader', async () => {
@@ -501,6 +502,19 @@ describe('PdfWorkspaceChrome header dock', () => {
     expect(tabs.some((label) => label.includes('AI'))).toBe(true);
     // The top-bar toggle is the only close control.
     expect(container.querySelector('[data-pdf-workspace-panel-close]')).toBeNull();
+
+    // PATCH-349: the workspace panel's switch is the same small text-button
+    // shape as the top-bar toggle, not a full-width grey-track segment.
+    const switchTabs = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-pdf-workspace-right-panel-content] [role="tab"]'),
+    );
+    for (const tab of switchTabs) {
+      expect(tab.className).toContain(KNOWLEDGE_TEXT_BUTTON_CLASS);
+      expect(tab.className).toContain('h-6');
+      expect(tab.className).not.toContain('py-1.5');
+    }
+    const selectedTab = switchTabs.find((tab) => tab.getAttribute('aria-selected') === 'true');
+    expect(selectedTab?.className).toBe(KNOWLEDGE_TEXT_BUTTON_CLASS + KNOWLEDGE_CONTROL_ACTIVE_BLUE);
 
     const withoutAi = mount(<TestWorkspace initialTabs={[alpha]} initialActive="doc-a" aiAvailable={false} />);
     click(withoutAi.querySelector('[data-pdf-workspace-dock="toggle"]'));
