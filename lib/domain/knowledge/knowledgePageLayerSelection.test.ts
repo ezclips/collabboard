@@ -65,6 +65,43 @@ describe('normalization', () => {
   });
 });
 
+describe('PATCH-347: hyphens are ignored when matching', () => {
+  it('the live case: the dehyphenated stored text matches the layer hyphen', () => {
+    // OpenDataLoader dehyphenated a line-end hyphen, so `page.text` lost the
+    // hyphen the pdf.js layer still has. The span must slice the STORED text.
+    const stored = 'documentation, tirepressure label';
+    const layer = 'documentation, tire-\npressure label';
+    const match = matchLayerSelectionToPageText(stored, layer, 0.5);
+    expect(match).not.toBeNull();
+    expect(stored.slice(match!.charStart, match!.charEnd)).toBe(stored);
+  });
+
+  it('the reverse also matches: the stored text has the hyphen, the layer does not', () => {
+    const stored = 'documentation, tire-pressure label';
+    const layer = 'documentation, tirepressure label';
+    const match = matchLayerSelectionToPageText(stored, layer, 0.5);
+    expect(match).not.toBeNull();
+    expect(stored.slice(match!.charStart, match!.charEnd)).toBe(stored);
+  });
+
+  it('U+2010 and U+2011 behave like a plain hyphen', () => {
+    for (const hyphen of ['\u2010', '\u2011']) {
+      expect(matchLayerSelectionToPageText(`tire${hyphen}pressure`, 'tirepressure', 0.5)).not.toBeNull();
+      expect(matchLayerSelectionToPageText('tirepressure', `tire${hyphen}pressure`, 0.5)).not.toBeNull();
+    }
+  });
+
+  it('an en dash is NOT ignored: it carries meaning', () => {
+    expect(matchLayerSelectionToPageText('A2 Approved', 'A2 \u2013 Approved', 0.5)).toBeNull();
+    expect(matchLayerSelectionToPageText('A2 \u2013 Approved', 'A2 Approved', 0.5)).toBeNull();
+  });
+
+  it('a selection of only hyphens is refused', () => {
+    expect(matchLayerSelectionToPageText('the page text', '--', 0.5)).toBeNull();
+    expect(matchLayerSelectionToPageText('the page text', '\u2010\u2011', 0.5)).toBeNull();
+  });
+});
+
 describe('repeated phrases', () => {
   const pageText = 'alpha beta alpha beta alpha beta';
 

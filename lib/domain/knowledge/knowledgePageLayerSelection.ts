@@ -23,7 +23,23 @@ import { MAX_SOURCE_REFERENCE_QUOTE_LENGTH } from './knowledgeSourceReferenceWri
  * digits become ASCII), soft hyphens are invisible line-break hints that some
  * extractors keep and others drop, and removing whitespace is what makes the
  * two extractors' differing spacing and line breaks irrelevant.
+ *
+ * PATCH-347. HYPHENS ARE ALSO DROPPED, for a reason measured live: the extractor
+ * (OpenDataLoader) DEHYPHENATES a line-end hyphen, so `page.text` holds
+ * `documentation,tirepressurelabel` where the pdf.js text layer still has
+ * `documentation,tire-\npressurelabel`. Without this, every selection crossing
+ * that line could never match ("Couldn't match this to the page text"). Only the
+ * hyphen characters go -- U+002D hyphen-minus, U+2010 hyphen, U+2011
+ * non-breaking hyphen (U+00AD soft hyphen is dropped too): U+2012 figure dash,
+ * U+2013 en dash, U+2014 em dash and U+2212 minus carry meaning and the two
+ * extractors already agree on them, so they are kept.
+ *
+ * The dropped characters only vanish from the COMPARISON; the returned offsets
+ * still point at the original page text, so the stored quote is the canonical
+ * text (`tirepressure`), exactly as before.
  */
+const IGNORED_COMPARE_CHARS = new Set(['\u00AD', '-', '\u2010', '\u2011']);
+
 function normalizeForCompare(text: string): { normalized: string; toOriginal: number[] } {
   const normalized: string[] = [];
   const toOriginal: number[] = [];
@@ -42,11 +58,13 @@ function normalizeForCompare(text: string): { normalized: string; toOriginal: nu
       index += 1;
       continue;
     }
-    if (char === '\u00AD') continue;
+    if (IGNORED_COMPARE_CHARS.has(char)) continue;
     if (/\s/.test(char)) continue;
     const folded = char.normalize('NFKC');
     for (const foldedChar of folded) {
-      if (/\s/.test(foldedChar)) continue;
+      // A hyphen the raw check missed (NFKC folds U+2011 to U+2010) is dropped
+      // here too, so the two normalizers agree on the same character set.
+      if (/\s/.test(foldedChar) || IGNORED_COMPARE_CHARS.has(foldedChar)) continue;
       normalized.push(foldedChar);
       toOriginal.push(index);
     }
@@ -56,7 +74,10 @@ function normalizeForCompare(text: string): { normalized: string; toOriginal: nu
 
 /** The same normalization, without the map (the needle needs no offsets). */
 function normalizeNeedle(text: string): string {
-  return text.normalize('NFKC').replace(/\u00AD/g, '').replace(/\s+/g, '');
+  return text
+    .normalize('NFKC')
+    .replace(/[\u00AD\u002D\u2010\u2011]/g, '')
+    .replace(/\s+/g, '');
 }
 
 /**
