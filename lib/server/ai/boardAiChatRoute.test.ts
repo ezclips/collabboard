@@ -436,6 +436,29 @@ describe('26-30. failure behaviour', () => {
   });
 });
 
+describe('PATCH-350 a NON-Kanban turn leaves any change block untouched', () => {
+  it('stores the block text verbatim and returns no proposedChanges', async () => {
+    const repo = repository();
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'Answer.\n<kanban-changes>{"changes":[{"kind":"create","title":"X","column":"To do"}]}</kanban-changes>',
+      provider: 'deepseek', model: 'deepseek-chat',
+    });
+
+    const response = await post({ message: 'hello' });
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { message: { content: string; proposedChanges?: unknown } };
+
+    // No `kanban-board` block in this turn, so nothing is parsed: the text is
+    // stored exactly as the model wrote it, block included.
+    expect(payload.message.content).toContain('<kanban-changes>');
+    const assistantAppend = repo.appended
+      .map((entry) => entry as { role?: string; content?: unknown })
+      .find((entry) => entry.role === 'assistant');
+    expect(String(assistantAppend?.content)).toContain('<kanban-changes>');
+    expect(payload.message.proposedChanges).toBeUndefined();
+  });
+});
+
 describe('unimplemented and execution-naming fields are rejected, not ignored', () => {
   it('refuses every field the contract does not define', async () => {
     const repo = repository();

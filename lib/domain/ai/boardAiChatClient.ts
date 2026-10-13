@@ -15,6 +15,7 @@
 import { BOARD_AI_MESSAGE_ROLES, type BoardAiMessageRole } from './boardAiChat';
 import type { BoardAiCitationEnvelope } from './boardAiChatCitation';
 import type { BoardAiContextView } from './boardAiChatContext';
+import type { KanbanProposedChange } from './kanbanChangeProposals';
 
 /** Re-exported so a client bounds its composer by the SAME number the route enforces. */
 export const BOARD_AI_CHAT_MESSAGE_MAX = 4000;
@@ -58,4 +59,11 @@ export interface BoardAiChatMessageView {
    */
   readonly inputTokens?: number | null;
   readonly outputTokens?: number | null;
+  /**
+   * PATCH-350. Card changes this answer proposed on a Kanban turn, or
+   * absent/null when it proposed none. Present only in the POST response that
+   * generated it -- the proposals are not persisted, so a reloaded thread
+   * carries the answer text but no proposals.
+   */
+  readonly proposedChanges?: readonly KanbanProposedChange[] | null;
 }

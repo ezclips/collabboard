@@ -94,6 +94,10 @@ export default defineConfig({
       'components/billing/*.test.tsx',
       // PATCH-189: the billing page's trial lines and Free plan card.
       'app/dashboard/settings/**/*.test.tsx',
+      // PATCH-350: the Kanban Board AI bridge and the proposed-changes list live
+      // under components/kanban-canvas; without this line their tests are
+      // silently NOT RUN (the trap the notes above warn of).
+      'components/kanban-canvas/**/*.test.tsx',
       'components/ui/*.test.tsx',
       'components/canvas/*.test.tsx',
       'components/map/*.test.tsx',

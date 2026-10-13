@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isKanbanBoard,
   readKanbanBoardBlock,
+  readKanbanBoardColumnsAndRows,
   readKanbanCardBlock,
   type BoardAiKanbanSupabaseClient,
 } from './boardAiKanbanContext';
@@ -512,5 +513,61 @@ describe('PATCH-322 Addendum 2 an email display_name is not a name', () => {
     if (!result.ok || result.value === null) return;
     expect(result.value.text).toContain('a board member');
     expect(result.value.text).not.toContain('x@y.z');
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('PATCH-350 the board\'s columns and rows, for resolving proposed changes', () => {
+  it('reads id + name for this board\'s columns and rows, in order', async () => {
+    const { client } = fakeClient(kanbanTables());
+    const result = await readKanbanBoardColumnsAndRows(client, BOARD);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.columns).toEqual([
+      { id: COL_TODO, name: 'To do' },
+      { id: COL_DONE, name: 'Done' },
+    ]);
+    expect(result.value.rows).toEqual([
+      { id: ROW_HIGH, name: 'High' },
+      { id: ROW_LOW, name: 'Low' },
+    ]);
+  });
+
+  it('a NON-Kanban board resolves to empty lists, not an error', async () => {
+    const { client } = fakeClient(kanbanTables());
+    const result = await readKanbanBoardColumnsAndRows(client, OTHER);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value).toEqual({ columns: [], rows: [] });
+  });
+
+  it('a read error is reported, so the route can drop name-based changes', async () => {
+    // A client whose column read fails, everything else fine.
+    const client = {
+      from(table: string) {
+        const rows = table === 'boards'
+          ? [{ id: BOARD, layout: 'kanban' }]
+          : [];
+        return {
+          select() {
+            const query: Record<string, unknown> = {
+              eq() { return query; },
+              order() { return query; },
+              maybeSingle: async () => ({ data: rows[0] ?? null, error: null }),
+              then(resolve: (value: { data: Row[] | null; error: unknown }) => unknown) {
+                if (table === 'kanban_columns') {
+                  return Promise.resolve({ data: null, error: { message: 'down' } }).then(resolve);
+                }
+                return Promise.resolve({ data: rows, error: null }).then(resolve);
+              },
+            };
+            return query;
+          },
+        };
+      },
+      async rpc() { return { data: [], error: null }; },
+    } as unknown as BoardAiKanbanSupabaseClient;
+    const result = await readKanbanBoardColumnsAndRows(client, BOARD);
+    expect(result.ok).toBe(false);
   });
 });

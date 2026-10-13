@@ -200,6 +200,10 @@ import {
   type KanbanBoardAiBridgeApi,
   type KanbanBoardAiHost,
 } from '@/components/kanban-canvas/KanbanBoardAiBridge';
+import type {
+  KanbanApplyChangeResult,
+  KanbanProposedChange,
+} from '@/lib/domain/ai/kanbanChangeProposals';
 import { readKanbanViews, writeKanbanViews } from '@/lib/kanban/kanbanViewPrefs';
 import type { SourceReference } from '@/lib/domain/knowledge/knowledgePersistence';
 import type { KnowledgeSourcePageRequest, KnowledgeSourceReferenceDraft } from '@/lib/domain/knowledge/knowledgeSourceNoteDraft';
@@ -2524,6 +2528,20 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     });
     if (!cardId) throw new Error('card_save_failed');
     toast.success('Saved as card');
+  }, []);
+
+  /**
+   * PATCH-350. Apply user-approved proposed changes through the bridge. The
+   * drawer is given this only for an editor, so a viewer sees the proposals
+   * read-only. A change with no bridge (board not ready) fails honestly rather
+   * than pretending to apply.
+   */
+  const applyKanbanProposedChanges = useCallback(async (
+    changes: readonly KanbanProposedChange[],
+  ): Promise<readonly KanbanApplyChangeResult[]> => {
+    const bridge = kanbanBoardAiBridgeRef.current;
+    if (!bridge) return changes.map(() => ({ ok: false, message: 'The board is not ready yet' }));
+    return bridge.applyProposedChanges(changes);
   }, []);
 
   /**
@@ -9501,6 +9519,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             /* Editors only, and only the card action -- no Note, no wiki. */
             canSaveAssistantAsCard={canEditBoardContent}
             onSaveAssistantAsCard={canEditBoardContent ? saveBoardAiAnswerAsCard : undefined}
+            /* PATCH-350. Editors can apply proposed card changes; a viewer sees
+               the list read-only. */
+            onApplyKanbanChanges={canEditBoardContent ? applyKanbanProposedChanges : undefined}
           />
         ) : null}
       </>

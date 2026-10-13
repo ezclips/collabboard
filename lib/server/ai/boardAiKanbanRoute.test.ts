@@ -205,3 +205,75 @@ describe('PATCH-322 a Kanban turn reads through the caller and reaches the model
     expect(stored.items[1]).toMatchObject({ type: 'kanban-card', cardId: CARD_A, label: 'Ship the release' });
   });
 });
+
+describe('PATCH-350 a Kanban turn proposes card changes; the server resolves them', () => {
+  const body = () => ({ message: 'Split it up', context: { items: [{ type: 'kanban-board' }] } });
+
+  it('stores the clean prose and returns resolved proposals with real ids', async () => {
+    const repo = repository();
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'Here is the plan.\n<kanban-changes>{"changes":['
+        + '{"kind":"move","card":"S1.2","column":"To do"},'
+        + '{"kind":"create","title":"Task A","column":"to do"}'
+        + ']}</kanban-changes>',
+      provider: 'deepseek', model: 'deepseek-chat', source: 'byok',
+    });
+
+    const response = await post(body());
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { message: { content: string; proposedChanges?: unknown[] } };
+
+    // Clean prose stored: the block never reaches the DB row or the response.
+    expect(payload.message.content).toBe('Here is the plan.');
+    const assistantAppend = repo.appended.find((entry) => entry.role === 'assistant');
+    expect(assistantAppend?.content).toBe('Here is the plan.');
+    expect(JSON.stringify(repo.appended)).not.toContain('<kanban-changes>');
+
+    // Resolved against this turn's passages (S1.2 = Ship the release) and the
+    // board's own columns (case-insensitive "to do" -> To do).
+    expect(payload.message.proposedChanges).toEqual([
+      {
+        kind: 'move',
+        label: 'Move \u201cShip the release\u201d to To do',
+        cardId: CARD_A,
+        columnId: COL_TODO,
+      },
+      {
+        kind: 'create',
+        label: 'Create card \u201cTask A\u201d in To do',
+        columnId: COL_TODO,
+        title: 'Task A',
+      },
+    ]);
+  });
+
+  it('drops a change whose token or name names nothing this turn', async () => {
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'Plan.\n<kanban-changes>{"changes":['
+        + '{"kind":"move","card":"S1.9","column":"To do"},'
+        + '{"kind":"create","title":"X","column":"Nonexistent"}'
+        + ']}</kanban-changes>',
+      provider: 'deepseek', model: 'deepseek-chat', source: 'byok',
+    });
+    const response = await post(body());
+    const payload = await response.json() as { message: { proposedChanges?: unknown[] } };
+    expect(payload.message.proposedChanges).toBeUndefined();
+  });
+
+  it('the model is given the overview\'s tokens, never a card id', async () => {
+    await post(body());
+    const blocks = modelContext();
+    expect(blocks[0].type).toBe('kanban-board');
+    // The block text names cards by sub-token; no card id appears in it.
+    expect(blocks[0].text).toContain('[S1.1]');
+    expect(blocks[0].text).toContain('[S1.2]');
+    expect(blocks[0].text).not.toContain(CARD_A);
+    expect(blocks[0].text).not.toContain(CARD_B);
+  });
+
+  it('a plain Kanban turn with no block proposes nothing', async () => {
+    const response = await post(body());
+    const payload = await response.json() as { message: { proposedChanges?: unknown[] } };
+    expect(payload.message.proposedChanges).toBeUndefined();
+  });
+});

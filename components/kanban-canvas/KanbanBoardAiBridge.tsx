@@ -12,6 +12,11 @@
 
 import { createContext, useContext, useEffect, useMemo } from 'react';
 import { toast } from 'sonner';
+import {
+  kanbanPriorityCardValue,
+  type KanbanApplyChangeResult,
+  type KanbanProposedChange,
+} from '@/lib/domain/ai/kanbanChangeProposals';
 import { useKanbanData, useKanbanPersistence } from './store';
 
 /** One answer reduced to a card title + description, ready to create. */
@@ -31,6 +36,15 @@ export interface KanbanBoardAiBridgeApi {
   createCardFromAnswer(input: KanbanBoardAiAnswerInput): Promise<string | null>;
   /** The id + title a citation chip shows, or null for a card that is gone. */
   cardSummary(cardId: string): { readonly id: string; readonly title: string } | null;
+  /**
+   * PATCH-350. Apply user-approved proposed changes, SEQUENTIALLY, through the
+   * store's own actions -- so RLS decides exactly as for a manual edit. Returns
+   * one result per change, in order. A card that no longer exists fails that one
+   * change; the rest still run. Nothing here is called without a user click.
+   */
+  applyProposedChanges(
+    changes: readonly KanbanProposedChange[],
+  ): Promise<readonly KanbanApplyChangeResult[]>;
 }
 
 /** What CanvasClient can do for the card menu. */
@@ -131,7 +145,59 @@ export function KanbanBoardAiBridge({
       const card = data.cards.find((candidate) => candidate.id === cardId);
       return card ? { id: card.id, title: card.label } : null;
     },
+    async applyProposedChanges(changes) {
+      const results: KanbanApplyChangeResult[] = [];
+      // Sequential on purpose: each change's order index is read from the board
+      // as it stood after the previous one, so parallel writes would collide.
+      for (const change of changes) {
+        results.push(await applyOneChange(change));
+      }
+      return results;
+    },
   }), [actions, data.cards, data.columns, data.rows]);
+
+  /** One change, through the store's own actions. */
+  async function applyOneChange(change: KanbanProposedChange): Promise<KanbanApplyChangeResult> {
+    if (change.kind === 'create') {
+      if (!change.columnId) return { ok: false, message: 'This column no longer exists' };
+      const columnId = change.columnId;
+      const order = data.cards.filter((card) => card.columnId === columnId).length;
+      await actions.addCard({
+        id: crypto.randomUUID(),
+        label: change.title ?? 'Untitled',
+        description: change.description,
+        columnId,
+        rowId: change.rowId,
+        order,
+        priority: kanbanPriorityCardValue(change.priority),
+        start_date: change.startDate,
+        end_date: change.endDate,
+      });
+      return { ok: true };
+    }
+
+    const card = change.cardId ? data.cards.find((candidate) => candidate.id === change.cardId) : null;
+    if (!card) return { ok: false, message: 'This card no longer exists' };
+
+    if (change.kind === 'move') {
+      if (!change.columnId) return { ok: false, message: 'This column no longer exists' };
+      const order = data.cards.filter(
+        (candidate) => candidate.columnId === change.columnId && candidate.id !== change.cardId,
+      ).length;
+      await actions.moveCard(change.cardId!, change.columnId, change.rowId, order);
+      return { ok: true };
+    }
+
+    await actions.updateCard(change.cardId!, {
+      ...(change.title !== undefined ? { label: change.title } : {}),
+      ...(change.description !== undefined ? { description: change.description } : {}),
+      // A present key is an explicit choice, including None (priority 0).
+      ...(change.priority !== undefined ? { priority: kanbanPriorityCardValue(change.priority) } : {}),
+      ...(change.startDate !== undefined ? { start_date: change.startDate } : {}),
+      ...(change.endDate !== undefined ? { end_date: change.endDate } : {}),
+    });
+    return { ok: true };
+  }
 
   useEffect(() => {
     onRegister?.(api);

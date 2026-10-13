@@ -16,6 +16,7 @@ import {
   BOARD_AI_CITATION_INSTRUCTIONS,
   boardAiCitationSourceToken,
 } from '../../domain/ai/boardAiChatCitation';
+import { KANBAN_CHANGE_INSTRUCTIONS } from '../../domain/ai/kanbanChangeProposals';
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
 import { aiProviderInvalidConfiguration } from './providers/errors';
@@ -168,7 +169,7 @@ function searchSentencesFor(state: BoardAiChatSearchState): readonly string[] {
   return BOARD_AI_CHAT_NO_SEARCH_SENTENCES;
 }
 
-export function boardAiChatSystemPrompt(state: BoardAiChatSearchState = 'off'): string {
+export function boardAiChatSystemPrompt(state: BoardAiChatSearchState = 'off', kanban = false): string {
   return [
   'You are the CollabBoard Board AI assistant.',
   'This is a private conversation between you and one user about their board. No other collaborator can read it.',
@@ -188,6 +189,9 @@ export function boardAiChatSystemPrompt(state: BoardAiChatSearchState = 'off'): 
   // are the server's, and the server maps them back to its own blocks: this
   // asks the model to point at what it used, never to name a document.
   ...BOARD_AI_CITATION_INSTRUCTIONS,
+  // PATCH-350. Appended ONLY on a Kanban turn (a `kanban-board` block), so a
+  // turn on any other surface is byte-identical to before this feature existed.
+  ...(kanban ? KANBAN_CHANGE_INSTRUCTIONS : []),
   ].join('\n');
 }
 
@@ -366,6 +370,11 @@ export async function executeBoardAiChat(
     }
   }
 
+  // PATCH-350. A Kanban turn is one that carries the whole-board overview. The
+  // change instructions ride only then, so every other surface's prompt is
+  // unchanged byte for byte.
+  const kanban = context.some((block) => block.type === 'kanban-board');
+
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BOARD_AI_CHAT_TIMEOUT_MS);
   // PATCH-345. Captured through the optional callback, never returned by the
@@ -377,8 +386,9 @@ export async function executeBoardAiChat(
       model,
       apiKey: resolved.apiKey,
       // Conditional, never globally weakened: with the toggle off this is the
-      // exact string it has always been.
-      system: boardAiChatSystemPrompt(searchState),
+      // exact string it has always been, and the Kanban change instructions are
+      // present only on a turn that carries a `kanban-board` block.
+      system: boardAiChatSystemPrompt(searchState, kanban),
       user: serializeBoardAiChatPayload(boundBoardAiChatHistory(turns), context),
       maxTokens: BOARD_AI_CHAT_MAX_TOKENS,
       temperature: BOARD_AI_CHAT_TEMPERATURE,

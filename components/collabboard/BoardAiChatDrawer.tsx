@@ -38,6 +38,8 @@ import type {
   BoardAiChatThreadSummary,
 } from '@/lib/domain/ai/boardAiChatClient';
 import type { BoardAiContextRequestItem } from '@/lib/domain/ai/boardAiChatContext';
+import KanbanMessageProposals from '@/components/kanban-canvas/KanbanMessageProposals';
+import type { KanbanApplyChangeResult, KanbanProposedChange } from '@/lib/domain/ai/kanbanChangeProposals';
 
 /**
  * The board's private AI conversation.
@@ -182,6 +184,10 @@ export interface BoardAiChatDrawerProps {
    */
   readonly canSaveAssistantAsCard?: boolean;
   readonly onSaveAssistantAsCard?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
+  /** PATCH-350. Apply user-approved card changes. Absent for a viewer. */
+  readonly onApplyKanbanChanges?: (
+    changes: readonly KanbanProposedChange[],
+  ) => Promise<readonly KanbanApplyChangeResult[]>;
   /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
@@ -447,6 +453,7 @@ export default function BoardAiChatDrawer({
   onSaveAssistantAsNote,
   canSaveAssistantAsCard = false,
   onSaveAssistantAsCard,
+  onApplyKanbanChanges,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -538,6 +545,9 @@ export default function BoardAiChatDrawer({
     : EMPTY_DOCUMENT_SESSION;
   const activeThreadId = documentScopeId ? documentSession.activeThreadId : boardActiveThreadId;
   const messages = documentScopeId ? documentSession.messages : boardMessages;
+  /** PATCH-350. The messages on screen now, so a re-read cannot flash "Loading…". */
+  const messagesOnScreenRef = useRef<readonly BoardAiChatMessageView[]>(messages);
+  messagesOnScreenRef.current = messages;
   const draft = documentScopeId ? documentSession.draft : boardDraft;
   const loadingMessages = documentScopeId ? documentSession.loadingMessages : boardLoadingMessages;
   const sending = documentScopeId ? documentSession.sending : boardSending;
@@ -849,7 +859,8 @@ export default function BoardAiChatDrawer({
     if (activeThreadId === null) { setMessages([]); setLoadingMessages(false); return; }
     let cancelled = false;
     const requestDocumentScopeId = documentScopeId;
-    setLoadingMessages(true);
+    // PATCH-350. Only a load with nothing to show yet raises the indicator.
+    setLoadingMessages(messagesOnScreenRef.current.length === 0);
     (async () => {
       try {
         const response = await fetch(`${CHAT_PATH(boardId)}?threadId=${encodeURIComponent(activeThreadId)}`);
@@ -859,7 +870,11 @@ export default function BoardAiChatDrawer({
         if (!cancelled) setMessages(payload.messages ?? []);
       } catch {
         if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
-        if (!cancelled) { setMessages([]); setError('Could not load this conversation.'); }
+        // A failed re-read keeps what is on screen rather than blanking it.
+        if (!cancelled) {
+          if (messagesOnScreenRef.current.length === 0) setMessages([]);
+          setError('Could not load this conversation.');
+        }
       } finally {
         if (requestDocumentScopeId !== activeDocumentScopeRef.current) return;
         if (!cancelled) setLoadingMessages(false);
@@ -1523,6 +1538,8 @@ export default function BoardAiChatDrawer({
       setDraftContext(EMPTY_DRAFT_CONTEXT);
       if (payload?.message) {
         setMessages((current) => [...current, payload.message as BoardAiChatMessageView]);
+        // The answer is on screen; the re-reads are not a request in flight.
+        setSending(false);
       }
       // Only when the server had something to record: a plain turn has no chips
       // to fetch, and the optimistic row is already exactly what was stored.
@@ -1702,8 +1719,8 @@ export default function BoardAiChatDrawer({
         data-board-ai-chat-body="true"
         className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain px-3 py-2"
       >
-        {loadingThreads || loadingMessages ? (
-          <p className="flex items-center gap-1.5 text-[11px] italic text-gray-400">
+        {loadingThreads || (loadingMessages && messages.length === 0) ? (
+          <p data-board-ai-chat-loading="true" className="flex items-center gap-1.5 text-[11px] italic text-gray-400">
             <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
             Loading…
           </p>
@@ -1939,6 +1956,7 @@ export default function BoardAiChatDrawer({
                   </div>
                 </div>
               ) : null}
+              <KanbanMessageProposals message={message} canEdit={canSaveAssistantAsCard} onApply={onApplyKanbanChanges} />
               {canShowSaveAnswer ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
                   <button

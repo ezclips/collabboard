@@ -12,6 +12,15 @@ import {
   buildBoardAiCitationEnvelope,
   parseBoardAiCitationFooter,
 } from '@/lib/domain/ai/boardAiChatCitation';
+import {
+  parseKanbanChangeBlock,
+  resolveKanbanChanges,
+  type KanbanProposedChange,
+} from '@/lib/domain/ai/kanbanChangeProposals';
+import {
+  readKanbanBoardColumnsAndRows,
+  type BoardAiKanbanSupabaseClient,
+} from '@/lib/server/ai/boardAiKanbanContext';
 import { createBoardAiThreadRepository } from '@/lib/infra/ai/boardAiThreadRepository';
 import type { BoardAiChatSupabaseClient } from '@/lib/infra/ai/boardAiThreadRepository';
 import {
@@ -520,9 +529,19 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       }
     }
 
+    // PATCH-350. The Kanban change block is read ONLY on a turn that carried the
+    // whole-board overview. It is stripped wherever it sits -- the model may put
+    // it before or after the citation footer -- and it NEVER reaches storage or
+    // a browser: what the user sees is the prose the model wrote. On any other
+    // surface the raw text passes through untouched.
+    const isKanbanTurn = modelContext.some((block) => block.type === 'kanban-board');
+    const changeBlock = isKanbanTurn
+      ? parseKanbanChangeBlock(result.text)
+      : { prose: result.text, raw: null as null };
+
     // The machine footer is read here and nowhere else, and it never reaches
     // storage or a browser: what the user sees is the prose the model wrote.
-    const answer = parseBoardAiCitationFooter(result.text);
+    const answer = parseBoardAiCitationFooter(changeBlock.prose);
     const text = answer.content;
     if (!text) {
       return NextResponse.json(
@@ -539,6 +558,27 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      * yields no citation rather than failing the answer.
      */
     const citations = buildBoardAiCitationEnvelope(answer.tokens, modelContext);
+
+    /**
+     * PATCH-350. A proposed change is resolved against THIS turn's overview
+     * passages and the board's own columns/rows, read through the caller's
+     * client. The model named sub-tokens and names, never ids; an unknown token
+     * or name drops that change. Not persisted: after a reload the answer text
+     * stays and the proposal list does not, which the UI says.
+     */
+    let proposedChanges: readonly KanbanProposedChange[] = [];
+    if (isKanbanTurn && changeBlock.raw) {
+      const overview = modelContext.find((block) => block.type === 'kanban-board');
+      const columnsAndRows = await readKanbanBoardColumnsAndRows(
+        sessionClient as unknown as BoardAiKanbanSupabaseClient,
+        boardId,
+      );
+      proposedChanges = resolveKanbanChanges(changeBlock.raw, {
+        passages: overview?.passages ?? [],
+        columns: columnsAndRows.ok ? columnsAndRows.value.columns : [],
+        rows: columnsAndRows.ok ? columnsAndRows.value.rows : [],
+      });
+    }
 
     /**
      * The citation envelope, signed.
@@ -609,6 +649,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         // Re-derived from what was stored, through the same parser the history
         // read uses: one sanitized shape, whichever way a client got here.
         citations: boardAiCitationsFromStored(assistant.value.citations),
+        // PATCH-350. Omitted entirely when the answer proposed nothing, so a
+        // non-Kanban turn's message is byte-identical to before.
+        ...(proposedChanges.length > 0 ? { proposedChanges } : {}),
       },
     });
   } catch {

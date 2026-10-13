@@ -273,6 +273,52 @@ export async function readKanbanCardBlock(
   });
 }
 
+/**
+ * PATCH-350. The board's columns and rows as `{ id, name }`, so the route can
+ * resolve the NAMES the model used for a proposed change back to ids.
+ *
+ * Read with the caller's client, scoped to this board, and only on a turn that
+ * carries a `kanban-board` block. A board the caller cannot read resolves to
+ * nothing, and the route then drops every name-based change rather than
+ * guessing.
+ */
+export interface KanbanBoardColumnRowNames {
+  readonly columns: readonly { readonly id: string; readonly name: string }[];
+  readonly rows: readonly { readonly id: string; readonly name: string }[];
+}
+
+export async function readKanbanBoardColumnsAndRows(
+  client: BoardAiKanbanSupabaseClient,
+  boardId: string,
+): Promise<Result<KanbanBoardColumnRowNames, DomainError>> {
+  const kanban = await isKanbanBoard(client, boardId);
+  if (!kanban.ok) return kanban;
+  if (!kanban.value) return ok({ columns: [], rows: [] });
+
+  const { data: columns, error: columnsError } = await client
+    .from('kanban_columns')
+    .select('id, name')
+    .eq('canvas_id', boardId)
+    .order('order_index', { ascending: true });
+  if (columnsError) return err(domainError('unavailable', 'Could not read the board columns'));
+
+  const { data: rows, error: rowsError } = await client
+    .from('kanban_swimlanes')
+    .select('id, name')
+    .eq('canvas_id', boardId)
+    .order('order_index', { ascending: true });
+  if (rowsError) return err(domainError('unavailable', 'Could not read the board rows'));
+
+  return ok({
+    columns: (columns ?? [])
+      .map((column) => ({ id: text(column.id), name: text(column.name) }))
+      .filter((column) => column.id.length > 0),
+    rows: (rows ?? [])
+      .map((row) => ({ id: text(row.id), name: text(row.name) }))
+      .filter((row) => row.id.length > 0),
+  });
+}
+
 interface OrderedCard {
   readonly id: string;
   readonly title: string;

@@ -5,6 +5,7 @@ import {
   BOARD_AI_CHAT_MAX_HISTORY_MESSAGES,
   BOARD_AI_CHAT_SYSTEM_PROMPT,
   BOARD_AI_CHAT_TIMEOUT_MS,
+  boardAiChatSystemPrompt,
   boundBoardAiChatHistory,
   serializeBoardAiChatHistory,
   serializeBoardAiChatPayload,
@@ -272,5 +273,38 @@ describe('the execution seam reuses the existing authorities', () => {
     expect(keyUses).toEqual(['apiKey: resolved.apiKey']);
     // Timeout is owned here, matching the existing AI route's convention.
     expect(BOARD_AI_CHAT_TIMEOUT_MS).toBe(20_000);
+  });
+});
+
+describe('PATCH-350 the change instructions ride ONLY on a Kanban turn', () => {
+  it('the no-Kanban prompt is byte-identical to the exported constant', () => {
+    expect(boardAiChatSystemPrompt('off')).toBe(BOARD_AI_CHAT_SYSTEM_PROMPT);
+    expect(boardAiChatSystemPrompt('off', false)).toBe(BOARD_AI_CHAT_SYSTEM_PROMPT);
+    expect(BOARD_AI_CHAT_SYSTEM_PROMPT).not.toContain('<kanban-changes>');
+  });
+
+  it('a Kanban turn appends the change block instructions and nothing else', () => {
+    const kanban = boardAiChatSystemPrompt('off', true);
+    expect(kanban).toContain('<kanban-changes>');
+    expect(kanban).toContain('S2.5');
+    expect(kanban).toContain('Never delete');
+    // The base prompt is untouched: the Kanban text is purely an appendage.
+    expect(kanban.startsWith(BOARD_AI_CHAT_SYSTEM_PROMPT)).toBe(true);
+    expect(kanban.slice(BOARD_AI_CHAT_SYSTEM_PROMPT.length).length).toBeGreaterThan(0);
+  });
+
+  it('the serialized payload for a Kanban overview carries no card id', () => {
+    const block: ResolvedBoardAiContextBlock = {
+      type: 'kanban-board',
+      label: 'Kanban board',
+      text: '[S2.1] Ship the release · Done · High · no dates · high · doing · —',
+      passages: [{ source: 'kanban-card', cardId: 'secret-card-id', label: 'Ship the release' }],
+    };
+    const parsed = JSON.parse(serializeBoardAiChatPayload([turn('user', 'hi')], [block]));
+    expect(parsed.explicitContext[0].sourceId).toBe('S1');
+    expect(parsed.explicitContext[0].type).toBe('kanban-board');
+    // The passage's card id is a SERVER mapping and never reaches the model.
+    expect(JSON.stringify(parsed)).not.toContain('secret-card-id');
+    expect(JSON.stringify(parsed)).not.toContain('cardId');
   });
 });

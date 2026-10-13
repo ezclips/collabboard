@@ -18,6 +18,10 @@ import {
   boardAiDraftFromPage,
   type BoardAiDraftContextItem,
 } from '@/lib/domain/ai/boardAiChatDraftContext';
+import type {
+  KanbanApplyChangeResult,
+  KanbanProposedChange,
+} from '@/lib/domain/ai/kanbanChangeProposals';
 
 const BOARD_ID = '11111111-1111-4111-8111-111111111111';
 const THREAD = '22222222-2222-4222-8222-222222222222';
@@ -37,6 +41,10 @@ let host: HTMLElement;
 let fetchMock: ReturnType<typeof vi.fn>;
 let posted: Record<string, unknown>[] = [];
 let replyMessage: Record<string, unknown> | null = null;
+// PATCH-350 Addendum 1. Hold the thread re-read (GET ?threadId=) open, so the
+// test can inspect the indicators while it is in flight.
+let holdThreadGet = false;
+let heldThreadGetResolvers: Array<() => void> = [];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -63,7 +71,18 @@ function stubChat() {
     }
     const match = url.match(/threadId=([^&]+)/);
     if (match) {
-      return json({ thread: { id: match[1], title: null, createdAt: 'c', updatedAt: 'u' }, messages: messages[match[1]] ?? [] });
+      // The REAL GET never returns proposedChanges (they are not persisted), so
+      // the stub must strip them too -- that is what exercises the drawer
+      // carrying them across the same-turn reload.
+      const rows = (messages[match[1]] ?? []).map((row) => {
+        const { proposedChanges: _drop, ...rest } = row as Record<string, unknown>;
+        return rest;
+      });
+      const body = json({ thread: { id: match[1], title: null, createdAt: 'c', updatedAt: 'u' }, messages: rows });
+      if (holdThreadGet) {
+        return new Promise<Response>((resolve) => { heldThreadGetResolvers.push(() => resolve(body)); });
+      }
+      return body;
     }
     return json({ threads: [] });
   });
@@ -76,6 +95,9 @@ interface MountOptions {
   selectedBoardItem?: BoardAiDraftContextItem | null;
   canSaveAssistantAsCard?: boolean;
   onSaveAssistantAsCard?: (request: { messageId: string; content: string }) => Promise<void>;
+  onApplyKanbanChanges?: (
+    changes: readonly KanbanProposedChange[],
+  ) => Promise<readonly KanbanApplyChangeResult[]>;
   onOpenCitation?: (request: { cardId?: string }) => void;
 }
 
@@ -99,6 +121,7 @@ async function mount(options: MountOptions = {}) {
         selectedBoardItem={options.selectedBoardItem ?? null}
         canSaveAssistantAsCard={options.canSaveAssistantAsCard}
         onSaveAssistantAsCard={options.onSaveAssistantAsCard}
+        onApplyKanbanChanges={options.onApplyKanbanChanges}
         onOpenCitation={options.onOpenCitation as never}
       />
     );
@@ -126,7 +149,13 @@ const send = async () => {
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 };
 
-beforeEach(() => { document.body.innerHTML = ''; replyMessage = null; stubChat(); });
+beforeEach(() => {
+  document.body.innerHTML = '';
+  replyMessage = null;
+  holdThreadGet = false;
+  heldThreadGetResolvers = [];
+  stubChat();
+});
 afterEach(async () => {
   if (root) { const r = root; await act(async () => r.unmount()); }
   root = null;
@@ -237,5 +266,97 @@ describe('PATCH-323 an answer saves as a CARD on Kanban', () => {
     await send();
     await click('[data-board-ai-chat-action="save-card"]');
     expect(q('[data-board-ai-chat-save-note-error="true"]')?.textContent).toContain('Could not save card.');
+  });
+});
+
+describe('PATCH-350 proposed changes render under the answer', () => {
+  const proposed = [{
+    kind: 'move' as const,
+    label: 'Move \u201cShip the release\u201d to Done',
+    cardId: CARD,
+    columnId: 'col-done',
+  }];
+
+  it('an editor sees the list, it survives the same-turn reload, and Apply runs', async () => {
+    const onApply = vi.fn(async (changes: readonly KanbanProposedChange[]): Promise<readonly KanbanApplyChangeResult[]> => (
+      changes.map(() => ({ ok: true }))
+    ));
+    replyMessage = {
+      id: 'a1', role: 'assistant', content: 'Here is the plan.',
+      provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n', context: null,
+      proposedChanges: proposed,
+    };
+    holdThreadGet = true;
+    await mount({
+      autoContextRequests: KANBAN_AUTO,
+      canSaveAssistantAsCard: true,
+      onApplyKanbanChanges: onApply,
+    });
+    await type('move it');
+    await send();
+
+    // The proposals are on screen as soon as the answer is...
+    expect(q('[data-kanban-proposed-changes="true"]')).not.toBeNull();
+    // ...and survive the Kanban turn's own re-read, which drops them from the
+    // wire (the same message id keeps the memory).
+    await releaseThreadGet();
+    expect(q('[data-kanban-proposed-changes="true"]')).not.toBeNull();
+
+    await click('[data-kanban-proposed-apply="true"]');
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(q('[data-kanban-proposed-status="true"]')?.textContent).toContain('Applied 1 of 1 changes');
+  });
+
+  it('a viewer sees the list read-only, with no Apply', async () => {
+    replyMessage = {
+      id: 'a1', role: 'assistant', content: 'Here is the plan.',
+      provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n', context: null,
+      proposedChanges: proposed,
+    };
+    holdThreadGet = true;
+    await mount({ autoContextRequests: KANBAN_AUTO, canSaveAssistantAsCard: false });
+    await type('move it');
+    await send();
+    await releaseThreadGet();
+    expect(q('[data-kanban-proposed-changes="true"]')).not.toBeNull();
+    expect(q('[data-kanban-proposed-apply="true"]')).toBeNull();
+    expect(q('[data-kanban-proposed-readonly="true"]')?.textContent).toContain('Only editors can apply changes.');
+  });
+});
+
+/** Let every held thread re-read resolve, then flush. */
+async function releaseThreadGet() {
+  const resolvers = heldThreadGetResolvers;
+  heldThreadGetResolvers = [];
+  await act(async () => {
+    resolvers.forEach((resolve) => resolve());
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+describe('PATCH-350 Addendum 1 the post-answer re-read shows no second-request indicators', () => {
+  it('no "Thinking…", no "Loading…", and the thread is not blanked', async () => {
+    replyMessage = {
+      id: 'a1', role: 'assistant', content: 'Here is the plan.',
+      provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n', context: null,
+    };
+    holdThreadGet = true;
+    await mount({ autoContextRequests: KANBAN_AUTO });
+    await type('hello');
+    await send();
+
+    // The answer is on screen...
+    expect(host.textContent).toContain('Here is the plan.');
+    // ...and neither indicator reads as a second request or a reload.
+    expect(q('[data-board-ai-chat-pending="true"]')).toBeNull();
+    expect(q('[data-board-ai-chat-loading="true"]')).toBeNull();
+    // The thread is intact, not blanked.
+    expect(host.querySelectorAll('[data-board-ai-chat-message]')).toHaveLength(2);
+
+    // The held re-reads resolve; the thread stays whole and still shows nothing.
+    await releaseThreadGet();
+    expect(host.textContent).toContain('Here is the plan.');
+    expect(q('[data-board-ai-chat-loading="true"]')).toBeNull();
   });
 });
