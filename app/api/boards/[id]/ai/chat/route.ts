@@ -13,12 +13,14 @@ import {
   parseBoardAiCitationFooter,
 } from '@/lib/domain/ai/boardAiChatCitation';
 import {
+  checkKanbanPlan,
   parseKanbanChangeBlock,
   resolveKanbanChanges,
   type KanbanProposedChange,
 } from '@/lib/domain/ai/kanbanChangeProposals';
 import {
   readKanbanBoardColumnsAndRows,
+  readKanbanBoardPlanData,
   type BoardAiKanbanSupabaseClient,
 } from '@/lib/server/ai/boardAiKanbanContext';
 import { createBoardAiThreadRepository } from '@/lib/infra/ai/boardAiThreadRepository';
@@ -26,6 +28,7 @@ import type { BoardAiChatSupabaseClient } from '@/lib/infra/ai/boardAiThreadRepo
 import {
   BOARD_AI_CHAT_MESSAGE_MAX,
   executeBoardAiChat,
+  serverToday,
   type BoardAiChatTurn,
 } from '@/lib/server/ai/boardAiChatExecution';
 import { AIProviderError } from '@/lib/server/ai/providers/errors';
@@ -578,6 +581,30 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         columns: columnsAndRows.ok ? columnsAndRows.value.columns : [],
         rows: columnsAndRows.ok ? columnsAndRows.value.rows : [],
       });
+
+      /**
+       * PATCH-351. Check the plan against the board as it WOULD BE after all the
+       * proposed changes, and attach plain-words warnings to the changes they
+       * belong to. The dates come from the board's own cards and dependencies,
+       * read through the caller's client. A card with no dates on one side of a
+       * link is not checked for that link.
+       */
+      if (proposedChanges.length > 0) {
+        const planData = await readKanbanBoardPlanData(
+          sessionClient as unknown as BoardAiKanbanSupabaseClient,
+          boardId,
+        );
+        if (planData.ok) {
+          const warnings = checkKanbanPlan(proposedChanges, {
+            cards: planData.value.cards,
+            dependencies: planData.value.dependencies,
+            today: serverToday(),
+          });
+          proposedChanges = proposedChanges.map((change, index) => (
+            warnings[index].length > 0 ? { ...change, warnings: warnings[index] } : change
+          ));
+        }
+      }
     }
 
     /**

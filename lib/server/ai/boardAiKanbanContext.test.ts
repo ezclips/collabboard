@@ -4,6 +4,7 @@ import {
   isKanbanBoard,
   readKanbanBoardBlock,
   readKanbanBoardColumnsAndRows,
+  readKanbanBoardPlanData,
   readKanbanCardBlock,
   type BoardAiKanbanSupabaseClient,
 } from './boardAiKanbanContext';
@@ -146,7 +147,7 @@ function kanbanTables(over: Partial<Record<string, Row[]>> = {}): Record<string,
       },
     ],
     kanban_links: [
-      { from_card_id: CARD_A, to_card_id: CARD_B, relation: 'blocks' },
+      { from_card_id: CARD_A, to_card_id: CARD_B, relation: 'blocks', canvas_id: BOARD },
     ],
     kanban_comments: [
       { card_id: CARD_A, user_id: USER_A, text: 'First comment', created_at: '2026-10-02T00:00:00+00:00' },
@@ -297,6 +298,75 @@ describe('PATCH-322 the whole-board overview', () => {
     const { client } = fakeClient(kanbanTables());
     const result = await readKanbanBoardBlock(client, OTHER, 0);
     expect(result.ok && result.value).toBeNull();
+  });
+});
+
+describe('PATCH-351 the overview carries dependencies', () => {
+  /** CARD_B is S1.1 and CARD_A is S1.2 in the default overview. */
+  const withLinks = (links: Row[]) => kanbanTables({
+    kanban_links: links.map((link) => ({ canvas_id: BOARD, ...link })),
+  });
+  const blockText = async (links: Row[]) => {
+    const { client } = fakeClient(withLinks(links));
+    const result = await readKanbanBoardBlock(client, BOARD, 0);
+    expect(result.ok).toBe(true);
+    return result.ok && result.value !== null ? result.value.text : '';
+  };
+  const slaveLine = (text: string) => text.split('\n').find((line) => line.startsWith('[S1.1]')) ?? '';
+
+  it('finish-to-start: the slave says "after <master token>"', async () => {
+    const text = await blockText([{ from_card_id: CARD_A, to_card_id: CARD_B, relation: 'Depends on' }]);
+    expect(slaveLine(text)).toBe('[S1.1] Write docs · To do · Low · no dates · low · todo · — · after S1.2');
+  });
+
+  it.each([
+    ['Starts with', 'starts with S1.2'],
+    ['Finishes with', 'finishes with S1.2'],
+    ['Start to Finish', 'start-to-finish S1.2'],
+  ])('%s annotates the slave', async (relation, annotation) => {
+    const text = await blockText([{ from_card_id: CARD_A, to_card_id: CARD_B, relation }]);
+    expect(slaveLine(text)).toBe(`[S1.1] Write docs · To do · Low · no dates · low · todo · — · ${annotation}`);
+  });
+
+  it('"Relates to" adds nothing at all', async () => {
+    const text = await blockText([{ from_card_id: CARD_A, to_card_id: CARD_B, relation: 'Relates to' }]);
+    expect(slaveLine(text)).toBe('[S1.1] Write docs · To do · Low · no dates · low · todo · —');
+  });
+
+  it('a link whose master is not in the overview adds nothing', async () => {
+    const text = await blockText([{ from_card_id: CARD_C, to_card_id: CARD_B, relation: 'Depends on' }]);
+    expect(slaveLine(text)).toBe('[S1.1] Write docs · To do · Low · no dates · low · todo · —');
+  });
+});
+
+describe('PATCH-351 the plan data reader', () => {
+  it('returns cards with dates and the dependency list, only the real types', async () => {
+    const { client } = fakeClient(kanbanTables({
+      kanban_links: [
+        { from_card_id: CARD_A, to_card_id: CARD_B, relation: 'Depends on', canvas_id: BOARD },
+        { from_card_id: CARD_B, to_card_id: CARD_A, relation: 'Relates to', canvas_id: BOARD },
+        { from_card_id: CARD_A, to_card_id: CARD_C, relation: 'Starts with', canvas_id: BOARD },
+      ],
+    }));
+    const result = await readKanbanBoardPlanData(client, BOARD);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // `Relates to` never constrains, and a link to a card off this board is not
+    // a dependency of this board.
+    expect(result.value.dependencies).toEqual([
+      { masterCardId: CARD_A, slaveCardId: CARD_B, type: 'finish-to-start' },
+    ]);
+    expect(result.value.cards.find((card) => card.id === CARD_A)).toMatchObject({
+      title: 'Ship the release',
+      startDate: '2026-10-01',
+      endDate: '2026-10-10',
+    });
+  });
+
+  it('a NON-Kanban board resolves to empty lists', async () => {
+    const { client } = fakeClient(kanbanTables());
+    const result = await readKanbanBoardPlanData(client, OTHER);
+    expect(result.ok && result.value).toEqual({ cards: [], dependencies: [] });
   });
 });
 

@@ -169,7 +169,11 @@ function searchSentencesFor(state: BoardAiChatSearchState): readonly string[] {
   return BOARD_AI_CHAT_NO_SEARCH_SENTENCES;
 }
 
-export function boardAiChatSystemPrompt(state: BoardAiChatSearchState = 'off', kanban = false): string {
+export function boardAiChatSystemPrompt(
+  state: BoardAiChatSearchState = 'off',
+  kanban = false,
+  today?: string,
+): string {
   return [
   'You are the CollabBoard Board AI assistant.',
   'This is a private conversation between you and one user about their board. No other collaborator can read it.',
@@ -189,10 +193,18 @@ export function boardAiChatSystemPrompt(state: BoardAiChatSearchState = 'off', k
   // are the server's, and the server maps them back to its own blocks: this
   // asks the model to point at what it used, never to name a document.
   ...BOARD_AI_CITATION_INSTRUCTIONS,
-  // PATCH-350. Appended ONLY on a Kanban turn (a `kanban-board` block), so a
-  // turn on any other surface is byte-identical to before this feature existed.
+  // PATCH-350/351. Appended ONLY on a Kanban turn (a `kanban-board` block), so
+  // a turn on any other surface is byte-identical to before these features
+  // existed. "Today" is the SERVER's UTC date: a plan is checked against it, and
+  // a model with no today cannot schedule anything sensibly.
+  ...(kanban ? [`Today is ${today ?? serverToday()}.`] : []),
   ...(kanban ? KANBAN_CHANGE_INSTRUCTIONS : []),
   ].join('\n');
+}
+
+/** The server's date in UTC, as `YYYY-MM-DD`. */
+export function serverToday(now: Date = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 /**

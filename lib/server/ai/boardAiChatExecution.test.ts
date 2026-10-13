@@ -6,6 +6,7 @@ import {
   BOARD_AI_CHAT_SYSTEM_PROMPT,
   BOARD_AI_CHAT_TIMEOUT_MS,
   boardAiChatSystemPrompt,
+  serverToday,
   boundBoardAiChatHistory,
   serializeBoardAiChatHistory,
   serializeBoardAiChatPayload,
@@ -306,5 +307,27 @@ describe('PATCH-350 the change instructions ride ONLY on a Kanban turn', () => {
     // The passage's card id is a SERVER mapping and never reaches the model.
     expect(JSON.stringify(parsed)).not.toContain('secret-card-id');
     expect(JSON.stringify(parsed)).not.toContain('cardId');
+  });
+});
+
+describe('PATCH-351 today and the planning rules ride ONLY on a Kanban turn', () => {
+  it('a Kanban turn is told today and how to plan', () => {
+    const kanban = boardAiChatSystemPrompt('off', true, '2026-10-14');
+    expect(kanban).toContain('Today is 2026-10-14.');
+    expect(kanban).toContain('working days');
+    expect(kanban).toContain('start before today');
+    expect(kanban).toContain('startDate');
+    // Still a proposal, never a report (PATCH-350 Addendum 1).
+    expect(kanban).toContain('PROPOSAL awaiting');
+  });
+
+  it('a non-Kanban turn is never told today', () => {
+    expect(boardAiChatSystemPrompt('off', false, '2026-10-14')).not.toContain('Today is');
+    expect(BOARD_AI_CHAT_SYSTEM_PROMPT).not.toContain('Today is');
+  });
+
+  it('serverToday is the SERVER date in UTC', () => {
+    expect(serverToday(new Date('2026-10-14T23:30:00Z'))).toBe('2026-10-14');
+    expect(serverToday(new Date('2026-10-14T00:30:00+02:00'))).toBe('2026-10-13');
   });
 });

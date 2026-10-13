@@ -18,6 +18,10 @@ import {
   type BoardAiCitablePassage,
   type ResolvedBoardAiContextBlock,
 } from '../../domain/ai/boardAiChatContext';
+import {
+  kanbanDependencyTypeForRelation,
+  type KanbanDependencyType,
+} from '../../domain/ai/kanbanChangeProposals';
 
 /** The Kanban tables this reader touches. All read with the caller's client. */
 export interface BoardAiKanbanQuery extends PromiseLike<{
@@ -69,6 +73,16 @@ function dateOnly(value: unknown): string | null {
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/** PATCH-351. How a card's overview line says what it must follow. */
+function dependencyAnnotation(type: KanbanDependencyType, masterToken: string): string {
+  switch (type) {
+    case 'finish-to-start': return `after ${masterToken}`;
+    case 'start-to-start': return `starts with ${masterToken}`;
+    case 'finish-to-finish': return `finishes with ${masterToken}`;
+    case 'start-to-finish': return `start-to-finish ${masterToken}`;
+  }
 }
 
 /**
@@ -319,6 +333,77 @@ export async function readKanbanBoardColumnsAndRows(
   });
 }
 
+/**
+ * PATCH-351. The board's cards (id, title, dates) and its dependencies, so the
+ * route can check a proposed plan. Read with the caller's client, scoped to
+ * this board, and only on a turn that carries a `kanban-board` block.
+ */
+export interface KanbanBoardPlanCard {
+  readonly id: string;
+  readonly title: string;
+  readonly startDate: string | null;
+  readonly endDate: string | null;
+}
+
+export interface KanbanBoardDependency {
+  readonly masterCardId: string;
+  readonly slaveCardId: string;
+  readonly type: KanbanDependencyType;
+}
+
+export interface KanbanBoardPlanData {
+  readonly cards: readonly KanbanBoardPlanCard[];
+  readonly dependencies: readonly KanbanBoardDependency[];
+}
+
+export async function readKanbanBoardPlanData(
+  client: BoardAiKanbanSupabaseClient,
+  boardId: string,
+): Promise<Result<KanbanBoardPlanData, DomainError>> {
+  const kanban = await isKanbanBoard(client, boardId);
+  if (!kanban.ok) return kanban;
+  if (!kanban.value) return ok({ cards: [], dependencies: [] });
+
+  const { data: cards, error: cardsError } = await client
+    .from('kanban_cards')
+    .select('id, title, date_started, date_due')
+    .eq('canvas_id', boardId);
+  if (cardsError) return err(domainError('unavailable', 'Could not read the board cards'));
+
+  const cardRows = cards ?? [];
+  const cardIds = new Set(cardRows.map((card) => text(card.id)).filter(Boolean));
+
+  const { data: links, error: linksError } = await client
+    .from('kanban_links')
+    .select('from_card_id, to_card_id, relation')
+    .eq('canvas_id', boardId);
+  if (linksError) return err(domainError('unavailable', 'Could not read the board links'));
+
+  const dependencies: KanbanBoardDependency[] = [];
+  for (const link of links ?? []) {
+    const masterCardId = text(link.from_card_id);
+    const slaveCardId = text(link.to_card_id);
+    // Both ends must be on this board, and the relation must be a real
+    // dependency -- `Relates to` is never a constraint.
+    if (!cardIds.has(masterCardId) || !cardIds.has(slaveCardId)) continue;
+    const type = kanbanDependencyTypeForRelation(text(link.relation));
+    if (!type) continue;
+    dependencies.push({ masterCardId, slaveCardId, type });
+  }
+
+  return ok({
+    cards: cardRows
+      .map((card) => ({
+        id: text(card.id),
+        title: text(card.title) || 'Untitled',
+        startDate: dateOnly(card.date_started),
+        endDate: dateOnly(card.date_due),
+      }))
+      .filter((card) => card.id.length > 0),
+    dependencies,
+  });
+}
+
 interface OrderedCard {
   readonly id: string;
   readonly title: string;
@@ -405,6 +490,25 @@ export async function readKanbanBoardBlock(
     }
   }
 
+  // PATCH-351. Dependencies, so a card's overview line can say what it must
+  // follow. Only the four real types count; `Relates to` adds nothing.
+  const dependenciesBySlave = new Map<string, { readonly masterCardId: string; readonly type: KanbanDependencyType }[]>();
+  const { data: links, error: linksError } = await client
+    .from('kanban_links')
+    .select('from_card_id, to_card_id, relation')
+    .eq('canvas_id', boardId);
+  if (!linksError && links) {
+    for (const link of links) {
+      const masterCardId = text(link.from_card_id);
+      const slaveCardId = text(link.to_card_id);
+      const type = kanbanDependencyTypeForRelation(text(link.relation));
+      if (!masterCardId || !slaveCardId || !type) continue;
+      const current = dependenciesBySlave.get(slaveCardId) ?? [];
+      current.push({ masterCardId, type });
+      dependenciesBySlave.set(slaveCardId, current);
+    }
+  }
+
   const ordered: OrderedCard[] = cardRows.map((card) => {
     const id = text(card.id);
     const columnId = text(card.column_id);
@@ -433,25 +537,45 @@ export async function readKanbanBoardBlock(
     || a.cardOrder - b.cardOrder
   ));
 
-  const lines: string[] = [];
-  const passages: BoardAiCitablePassage[] = [];
-  let omitted = 0;
   // Room kept back so the "how many were left out" note can never be clipped by
   // the final clamp: the note is appended AFTER the last line that fit, and a
   // body trimmed to the ceiling would otherwise lose exactly the sentence that
   // makes the omission loud.
   const bodyBudget = BOARD_AI_CONTEXT_MAX_SINGLE_CHARS - 40;
-  ordered.forEach((card, index) => {
-    const token = `S${blockIndex + 1}.${index + 1}`;
-    const line = `[${token}] ${card.title} · ${card.columnName} · ${card.rowName} · ${card.dates} · ${card.priority} · ${card.status} · ${card.people}`;
-    const candidate = [...lines, line].join('\n');
-    if (candidate.length > bodyBudget) {
+  const baseLine = (card: OrderedCard, token: string): string =>
+    `[${token}] ${card.title} · ${card.columnName} · ${card.rowName} · ${card.dates} · ${card.priority} · ${card.status} · ${card.people}`;
+
+  // Pass 1: which cards fit, on the base lines -- the budget is the same rule
+  // it has always been. A card's token is its position in `ordered`.
+  const tokenByCardId = new Map<string, string>();
+  ordered.forEach((card, index) => tokenByCardId.set(card.id, `S${blockIndex + 1}.${index + 1}`));
+  const visibleIds = new Set<string>();
+  const baseLines: string[] = [];
+  let omitted = 0;
+  ordered.forEach((card) => {
+    const line = baseLine(card, tokenByCardId.get(card.id) as string);
+    if ([...baseLines, line].join('\n').length > bodyBudget) {
       omitted += 1;
       return;
     }
-    lines.push(line);
-    passages.push({ source: 'kanban-card', cardId: card.id, label: boardAiContextLabel(card.title) });
+    baseLines.push(line);
+    visibleIds.add(card.id);
   });
+
+  // Pass 2: the SAME cards, each line annotated with the dependencies whose
+  // master is ALSO in this overview -- a link to a card that is not shown adds
+  // nothing, because its token is not a line the model can read.
+  const lines: string[] = [];
+  const passages: BoardAiCitablePassage[] = [];
+  for (const card of ordered) {
+    if (!visibleIds.has(card.id)) continue;
+    const token = tokenByCardId.get(card.id) as string;
+    const annotations = (dependenciesBySlave.get(card.id) ?? [])
+      .filter((dependency) => visibleIds.has(dependency.masterCardId))
+      .map((dependency) => dependencyAnnotation(dependency.type, tokenByCardId.get(dependency.masterCardId) as string));
+    lines.push([baseLine(card, token), ...annotations].join(' · '));
+    passages.push({ source: 'kanban-card', cardId: card.id, label: boardAiContextLabel(card.title) });
+  }
   if (omitted > 0) lines.push(`(+${omitted} more cards not shown)`);
 
   const body = lines.length > 0 ? lines.join('\n') : 'No cards on this board.';

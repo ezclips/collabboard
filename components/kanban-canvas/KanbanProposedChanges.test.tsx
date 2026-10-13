@@ -114,3 +114,52 @@ describe('PATCH-350 KanbanProposedChanges', () => {
     expect(q('[data-kanban-proposed-readonly="true"]')?.textContent).toContain('Only editors can apply changes.');
   });
 });
+
+describe('PATCH-351 the schedule view', () => {
+  const SCHEDULE: readonly KanbanProposedChange[] = [
+    {
+      kind: 'update', label: 'Set start date of “Launch” to 20 Oct 2026',
+      cardId: 'c2', cardTitle: 'Launch', startDate: '2026-10-20', endDate: '2026-10-22',
+    },
+    {
+      kind: 'update', label: 'Set start date of “Design homepage” to 13 Oct 2026',
+      cardId: 'c1', cardTitle: 'Design homepage', startDate: '2026-10-13', endDate: '2026-10-16',
+    },
+  ];
+  const checkbox = (index: number) =>
+    host.querySelector(`[data-kanban-proposed-change-checkbox="${index}"]`) as HTMLInputElement;
+
+  it('titles a plan "Proposed schedule" and sorts the date changes by start date', () => {
+    render({ changes: SCHEDULE });
+    expect(host.textContent).toContain('Proposed schedule (2)');
+    const labels = Array.from(host.querySelectorAll('[data-kanban-proposed-change-label]'))
+      .map((node) => node.textContent);
+    expect(labels).toEqual([
+      '“Design homepage”: Tue 13 Oct → Fri 16 Oct',
+      '“Launch”: Tue 20 Oct → Thu 22 Oct',
+    ]);
+  });
+
+  it('shows a warning in amber and leaves that change UNTICKED by default', () => {
+    const warned: readonly KanbanProposedChange[] = [
+      { ...SCHEDULE[0], warnings: ['Starts before “Design homepage” ends, which it depends on'] },
+      SCHEDULE[1],
+    ];
+    render({ changes: warned });
+    const warning = q('[data-kanban-proposed-warning="true"]');
+    expect(warning).not.toBeNull();
+    expect(warning!.textContent).toContain('Starts before “Design homepage” ends');
+    expect(warning!.className).toContain('amber');
+    // The warned change (original index 0) starts unticked; the other does not.
+    expect(checkbox(0).checked).toBe(false);
+    expect(checkbox(1).checked).toBe(true);
+    // Apply is still offered -- the user may tick it anyway.
+    expect(q('[data-kanban-proposed-apply="true"]')).not.toBeNull();
+  });
+
+  it('a single date change is NOT a schedule -- the plain list is unchanged', () => {
+    render({ changes: [SCHEDULE[0], CHANGES[1]] });
+    expect(host.textContent).toContain('Proposed changes (2)');
+    expect(host.textContent).not.toContain('Proposed schedule');
+  });
+});

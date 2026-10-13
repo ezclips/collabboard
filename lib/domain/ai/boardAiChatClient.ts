@@ -64,6 +64,10 @@ export interface BoardAiChatMessageView {
    * absent/null when it proposed none. Present only in the POST response that
    * generated it -- the proposals are not persisted, so a reloaded thread
    * carries the answer text but no proposals.
+   *
+   * PATCH-351. Each change may carry `warnings`: plain-words plan problems the
+   * server found (a dependency violated, a start before today). A warned change
+   * is shown in amber and unticked by default.
    */
   readonly proposedChanges?: readonly KanbanProposedChange[] | null;
 }

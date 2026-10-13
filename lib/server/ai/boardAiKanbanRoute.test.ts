@@ -68,7 +68,7 @@ function sessionClient() {
       {
         id: CARD_A, title: 'Ship the release', content: 'Cut the branch.',
         column_id: COL_TODO, swimlane_id: ROW_LOW, priority: 3, status: 'doing',
-        project_id: null, score: 40, date_started: null, date_due: '2026-10-10T00:00:00+00:00',
+        project_id: null, score: 40, date_started: null, date_due: '2030-11-10T00:00:00+00:00',
         assignee_id: null, order_index: 1, canvas_id: BOARD_ID,
       },
       {
@@ -78,7 +78,11 @@ function sessionClient() {
         assignee_id: null, order_index: 0, canvas_id: BOARD_ID,
       },
     ],
-    kanban_links: [],
+    kanban_links: [
+      // PATCH-351. CARD_B depends on CARD_A (finish -> start): CARD_A ends
+      // 2026-10-10, so CARD_B must not start before then.
+      { from_card_id: CARD_A, to_card_id: CARD_B, relation: 'Depends on', canvas_id: BOARD_ID },
+    ],
     kanban_comments: [{ card_id: CARD_A, user_id: USER_A, text: 'ping', created_at: '2026-10-02T00:00:00+00:00' }],
     kanban_card_assignees: [],
     kanban_board_members: [{ canvas_id: BOARD_ID, user_id: USER_A, display_name: 'Ada', email: 'ada@example.com' }],
@@ -236,6 +240,7 @@ describe('PATCH-350 a Kanban turn proposes card changes; the server resolves the
         kind: 'move',
         label: 'Move \u201cShip the release\u201d to To do',
         cardId: CARD_A,
+        cardTitle: 'Ship the release',
         columnId: COL_TODO,
       },
       {
@@ -243,6 +248,7 @@ describe('PATCH-350 a Kanban turn proposes card changes; the server resolves the
         label: 'Create card \u201cTask A\u201d in To do',
         columnId: COL_TODO,
         title: 'Task A',
+        cardTitle: 'Task A',
       },
     ]);
   });
@@ -275,5 +281,45 @@ describe('PATCH-350 a Kanban turn proposes card changes; the server resolves the
     const response = await post(body());
     const payload = await response.json() as { message: { proposedChanges?: unknown[] } };
     expect(payload.message.proposedChanges).toBeUndefined();
+  });
+});
+
+describe('PATCH-351 warnings on a proposed plan', () => {
+  const body = () => ({ message: 'Plan it', context: { items: [{ type: 'kanban-board' }] } });
+  const propose = (changes: unknown) => {
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: `Plan.\n<kanban-changes>${JSON.stringify({ changes })}</kanban-changes>`,
+      provider: 'deepseek', model: 'deepseek-chat', source: 'byok',
+    });
+  };
+  const proposed = async () => {
+    const response = await post(body());
+    const payload = await response.json() as {
+      message: { proposedChanges?: Array<{ warnings?: readonly string[] }> };
+    };
+    return payload.message.proposedChanges ?? [];
+  };
+
+  it('attaches the dependency warning to the change that breaks it', async () => {
+    // CARD_B is S1.1 and depends on CARD_A (ends 2030-11-10).
+    propose([{ kind: 'update', card: 'S1.1', startDate: '2030-11-05', endDate: '2030-11-08' }]);
+    const changes = await proposed();
+    expect(changes).toHaveLength(1);
+    expect(changes[0].warnings).toEqual([
+      'Starts before “Ship the release” ends, which it depends on',
+    ]);
+  });
+
+  it('no warning when the plan respects the dependency', async () => {
+    propose([{ kind: 'update', card: 'S1.1', startDate: '2030-11-11', endDate: '2030-11-14' }]);
+    const changes = await proposed();
+    expect(changes).toHaveLength(1);
+    expect(changes[0].warnings).toBeUndefined();
+  });
+
+  it('a change that sets no date carries no warnings', async () => {
+    propose([{ kind: 'update', card: 'S1.1', priority: 3 }]);
+    const changes = await proposed();
+    expect(changes[0].warnings).toBeUndefined();
   });
 });
