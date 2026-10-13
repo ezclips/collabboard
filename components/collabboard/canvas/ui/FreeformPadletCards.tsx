@@ -336,6 +336,8 @@ export interface FreeformPadletCardsProps {
   onSendToKanban?: (padletId: string) => void;
   onOpenKanbanCard?: (link: { boardId: string; cardId: string }) => void;
   onUnlinkKanban?: (padletId: string) => void;
+  // PATCH-353. "AI on notes…" on a note's context menu (editors only).
+  onAiOnNotes?: (padletId: string) => void;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -608,7 +610,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     commentAccessMode = 'manage',
     commentModeMutations,
     onKnowledgeSourceClipDropOnNote, onResetImageCrop,
-    kanbanLinkStatus, onSendToKanban, onOpenKanbanCard, onUnlinkKanban,
+    kanbanLinkStatus, onSendToKanban, onOpenKanbanCard, onUnlinkKanban, onAiOnNotes,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -5433,6 +5435,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             onSendToKanban={isNotePost(padlet) && onSendToKanban ? () => onSendToKanban(padlet.id) : undefined}
             onOpenKanbanCard={onOpenKanbanCard}
             onUnlinkKanban={isNotePost(padlet) && onUnlinkKanban ? () => onUnlinkKanban(padlet.id) : undefined}
+            onAiOnNotes={isNotePost(padlet) && onAiOnNotes ? () => onAiOnNotes(padlet.id) : undefined}
           >
             {/* PATCH FREEFORM-SELECTION-BATCH-1: same fix as Table, scoped to
                 Note/AI-component/PDF ONLY -- this wrapper is also the

@@ -121,6 +121,8 @@ import {
   type KanbanLink,
 } from '@/lib/domain/canvas/noteToKanbanCard';
 import { SendToKanbanDialog, type SendToKanbanSelection } from '@/components/collabboard/SendToKanbanDialog';
+import NotesAiDialog from '@/components/collabboard/NotesAiDialog';
+import { useNotesAi } from '@/components/collabboard/useNotesAi';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -7128,6 +7130,21 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     await updatePadletMetadataNow(padletId, { kanbanLink: null });
   }, [updatePadletMetadataNow]);
 
+  // === BEGIN PATCH-353: AI on notes ==========================================
+  const notesAi = useNotesAi({
+    boardId: canvasId ?? null,
+    notes: padlets,
+    selectedPadletIds,
+    canEdit: canEditBoardContent,
+    getFreePostPosition,
+    getZIndex: () => nextZIndex(padlets),
+    onAddPost: async (row) => {
+      const created = await insertPostAndSelectOrThrow(row as any) as Padlet | null;
+      if (!created) throw new Error('post_insert_failed');
+      setPadlets((current) => [...current, created]);
+    },
+  });
+
   // Live chip data: one read per board load, refreshed on focus and every 60 s.
   const kanbanLinks = useMemo<KanbanLinkRef[]>(() => {
     const links: KanbanLinkRef[] = [];
@@ -11111,6 +11128,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     onSendToKanban={openSendToKanban}
                     onOpenKanbanCard={openKanbanCard}
                     onUnlinkKanban={unlinkKanban}
+                    onAiOnNotes={canEditBoardContent ? notesAi.open : undefined}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -11128,6 +11146,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                 onConfirm={confirmSendToKanban}
               />
             )}
+
+            <NotesAiDialog {...notesAi.dialogProps} />
 
             {isFreeformLayout && (
               <div

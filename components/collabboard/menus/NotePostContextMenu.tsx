@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/context-menu';
 import { ActionId, actionRegistry } from '@/lib/collabboard/ActionRegistry';
 import { Padlet } from '@/types/collabboard';
-import { Lock, LockOpen, SquareKanban } from 'lucide-react';
+import { Lock, LockOpen, Sparkles, SquareKanban } from 'lucide-react';
 import { readKanbanLink, type KanbanLink } from '@/lib/domain/canvas/noteToKanbanCard';
 import { GroupIntoColumnMenuItem } from './GroupIntoColumnMenuItem';
 
@@ -51,6 +51,10 @@ interface NotePostContextMenuProps {
     onSendToKanban?: () => void;
     onOpenKanbanCard?: (link: KanbanLink) => void;
     onUnlinkKanban?: () => void;
+    // PATCH-353. "AI on notes…" -- the shared Summary / Action plan dialog.
+    // Passed only to board editors on Freeform, so it is undefined (hidden)
+    // everywhere else.
+    onAiOnNotes?: () => void;
     disabled?: boolean;
 }
 
@@ -78,6 +82,7 @@ export function NotePostContextMenu({
     onSendToKanban,
     onOpenKanbanCard,
     onUnlinkKanban,
+    onAiOnNotes,
     disabled = false,
 }: NotePostContextMenuProps) {
     const link = kanbanLink ?? readKanbanLink(padlet);
@@ -176,8 +181,14 @@ export function NotePostContextMenu({
                     }}
                 />
 
-                {((link && (onOpenKanbanCard || onUnlinkKanban)) || (!link && onSendToKanban)) && (
+                {((link && (onOpenKanbanCard || onUnlinkKanban)) || (!link && onSendToKanban) || onAiOnNotes) && (
                     <ContextMenuSeparator />
+                )}
+
+                {onAiOnNotes && (
+                    <ContextMenuItem onClick={onAiOnNotes} icon={<Sparkles />}>
+                        AI on notes…
+                    </ContextMenuItem>
                 )}
 
                 {link ? (

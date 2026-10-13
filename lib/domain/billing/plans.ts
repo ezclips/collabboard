@@ -243,7 +243,9 @@ export type AiCreditFeature =
   | 'table_plan'
   | 'notes_to_cards'
   | 'transcript_punctuate'
-  | 'component';
+  | 'component'
+  // PATCH-353. AI on notes: Summary / Action plan.
+  | 'notes_ai';
 
 /**
  * PRICING.md §4, basic model. Must be calibrated against measured costs before
@@ -259,6 +261,7 @@ export const AI_CREDIT_COSTS: Readonly<Record<AiCreditFeature, number>> = deepFr
   notes_to_cards: 1,
   transcript_punctuate: 1,
   component: 1,
+  notes_ai: 1,
 });
 
 /** The extra credit a Board AI chat answer costs when board search ran for it. */

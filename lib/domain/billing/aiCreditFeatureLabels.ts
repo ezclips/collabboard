@@ -17,6 +17,7 @@ const FEATURE_LABELS: Record<AiCreditFeature, string> = {
   notes_to_cards: 'Suggest cards',
   transcript_punctuate: 'Readable transcript',
   component: 'AI card',
+  notes_ai: 'AI on notes',
 };
 
 export function aiCreditFeatureLabel(feature: AiCreditFeature | string): string {

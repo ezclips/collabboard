@@ -241,6 +241,7 @@ describe('PATCH-187 — AI credits', () => {
       notes_to_cards: 1,
       transcript_punctuate: 1,
       component: 1,
+      notes_ai: 1,
     });
     expect(BOARD_CHAT_SEARCH_SURCHARGE).toBe(1);
     expect(Object.isFrozen(AI_CREDIT_COSTS)).toBe(true);
