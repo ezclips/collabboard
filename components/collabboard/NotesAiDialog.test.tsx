@@ -7,9 +7,13 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ requestNotesAi: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  requestNotesAi: vi.fn(),
+  // A callable toast with the methods the hook uses.
+  toast: Object.assign(vi.fn(), { success: vi.fn(), info: vi.fn(), error: vi.fn() }),
+}));
 vi.mock('@/lib/infra/ai/requestNotesAi', () => ({ requestNotesAi: mocks.requestNotesAi }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: mocks.toast }));
 
 import { NotesAiDialog } from './NotesAiDialog';
 import {
@@ -52,15 +56,39 @@ const note = (id: string, title: string, content: string, positionY: number): Pa
 
 const NOTES = [note('n1', 'Venue', 'Book the venue', 0), note('n2', 'Catering', 'Find a caterer', 100)];
 
+type PostRect = { x: number; y: number; width: number; height: number };
+type Move = { id: string; x: number; y: number };
+
+/** Rendered rects for the given ids, or every id when `ids` is omitted. */
+function rectsFor(entries: Record<string, PostRect>) {
+  return (ids?: readonly string[]): ReadonlyMap<string, PostRect> => {
+    const map = new Map<string, PostRect>();
+    for (const [id, rect] of Object.entries(entries)) {
+      if (!ids || ids.includes(id)) map.set(id, rect);
+    }
+    return map;
+  };
+}
+
+interface HarnessProps {
+  notes?: Padlet[];
+  selectedPadletIds?: string[];
+  onAddPost?: (row: Padlet) => Promise<void>;
+  readPostRects?: (ids?: readonly string[]) => ReadonlyMap<string, PostRect>;
+  onMovePosts?: (moves: readonly Move[]) => Promise<boolean>;
+  onDeletePost?: (id: string) => Promise<void>;
+  onReveal?: (id: string) => void;
+}
+
 function Harness({
   notes = NOTES,
   selectedPadletIds = [],
   onAddPost,
-}: {
-  notes?: Padlet[];
-  selectedPadletIds?: string[];
-  onAddPost: (row: Padlet) => Promise<void>;
-}) {
+  readPostRects,
+  onMovePosts,
+  onDeletePost,
+  onReveal,
+}: HarnessProps) {
   const ai = useNotesAi({
     boardId: 'board-1',
     notes,
@@ -68,7 +96,11 @@ function Harness({
     canEdit: true,
     getFreePostPosition: () => ({ x: 10, y: 20 }),
     getZIndex: () => 7,
-    onAddPost,
+    onAddPost: onAddPost ?? (async () => {}),
+    readPostRects: readPostRects ?? (() => new Map()),
+    onMovePosts: onMovePosts ?? (async () => true),
+    onDeletePost: onDeletePost ?? (async () => {}),
+    onReveal: onReveal ?? (() => {}),
   });
   return (
     <>
@@ -78,12 +110,12 @@ function Harness({
   );
 }
 
-async function mount(props: { notes?: Padlet[]; selectedPadletIds?: string[]; onAddPost?: (row: Padlet) => Promise<void> }) {
+async function mount(props: HarnessProps) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<Harness notes={props.notes} selectedPadletIds={props.selectedPadletIds} onAddPost={props.onAddPost ?? (async () => {})} />);
+    root!.render(<Harness {...props} />);
   });
 }
 
@@ -325,5 +357,207 @@ describe('PATCH-353 the note menu offers "AI on notes…"', () => {
 
     await openMenu({});
     expect(menuLabels().some((label) => label.includes('AI on notes'))).toBe(false);
+  });
+});
+
+describe('PATCH-354 group by theme', () => {
+  const inColumn = (id: string): Padlet => ({
+    ...note(id, '', 'x', 0),
+    metadata: { parentId: 'container-1' },
+  });
+  const THEMES_RESULT = { themes: [
+    { title: 'Venue', noteRefs: ['N1'] },
+    { title: 'Budget', noteRefs: ['N2'] },
+  ] };
+  const TWO_RECTS = rectsFor({
+    n1: { x: 0, y: 0, width: 200, height: 80 },
+    n2: { x: 300, y: 0, width: 200, height: 80 },
+  });
+
+  it('says how many ticked notes inside columns are left out', async () => {
+    const notes = [note('n1', 'Venue', 'Book the venue', 0), inColumn('n2')];
+    await mount({ notes, selectedPadletIds: ['n1', 'n2'] });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    expect(q('[data-notes-ai-left-out="true"]')?.textContent).toContain('1 note inside columns are left out');
+  });
+
+  it('Arrange creates one heading per theme (with the edited title) and moves the free notes', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    const added: Padlet[] = [];
+    const moved: Move[][] = [];
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async (row) => { added.push(row); },
+      onMovePosts: async (moves) => { moved.push([...moves]); return true; },
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    // Rename the first theme.
+    await act(async () => {
+      const input = document.querySelectorAll<HTMLInputElement>('[data-notes-ai-theme-title]')[0];
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input, 'Venue & travel');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click('[data-notes-ai-arrange="true"]');
+
+    expect(added).toHaveLength(2);
+    expect(added[0]).toMatchObject({ type: 'section_heading', title: 'Venue & travel' });
+    expect(added[1]).toMatchObject({ type: 'section_heading', title: 'Budget' });
+    expect(added.every((row) => (row.metadata as { headingLevel: number }).headingLevel === 3)).toBe(true);
+    expect(moved).toHaveLength(1);
+    expect(moved[0].map((move) => move.id).sort()).toEqual(['n1', 'n2']);
+    // Columns left to right.
+    expect(moved[0].find((move) => move.id === 'n1')!.x).toBeLessThan(moved[0].find((move) => move.id === 'n2')!.x);
+  });
+
+  it('a failed arrangement undoes itself and says so', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    const added: Padlet[] = [];
+    const moved: Move[][] = [];
+    const deleted: string[] = [];
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async (row) => { added.push(row); },
+      // The first call (the moves) fails; the rollback call succeeds.
+      onMovePosts: async (moves) => { moved.push([...moves]); return moved.length > 1; },
+      onDeletePost: async (id) => { deleted.push(id); },
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    expect(added).toHaveLength(2);
+    expect(moved).toHaveLength(2);
+    expect(deleted).toHaveLength(2);
+    expect(mocks.toast.error).toHaveBeenCalledWith("Couldn't arrange the notes — nothing was changed.");
+  });
+
+  it('Undo restores every old position and deletes the headings', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    const added: Padlet[] = [];
+    const moved: Move[][] = [];
+    const deleted: string[] = [];
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async (row) => { added.push(row); },
+      onMovePosts: async (moves) => { moved.push([...moves]); return true; },
+      onDeletePost: async (id) => { deleted.push(id); },
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    expect(mocks.toast.success).toHaveBeenCalled();
+    expect(mocks.toast.success.mock.calls[0][0]).toContain('Arranged 2 notes into 2 themes');
+    const options = mocks.toast.success.mock.calls[0][1] as { action: { onClick: () => void } };
+    await act(async () => { options.action.onClick(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(moved).toHaveLength(2);
+    expect(moved[1]).toEqual([{ id: 'n1', x: 0, y: 0 }, { id: 'n2', x: 0, y: 100 }]);
+    expect(deleted).toEqual(added.map((row) => row.id));
+    expect(mocks.toast).toHaveBeenCalledWith('Arrangement undone');
+  });
+
+  it('slides the arrangement right WITHOUT dropping notes below their headings', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    const added: Padlet[] = [];
+    const moved: Move[][] = [];
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async (row) => { added.push(row); },
+      onMovePosts: async (moves) => { moved.push([...moves]); return true; },
+      // An unrelated post overlapping the origin forces a slide (dx > 0).
+      readPostRects: rectsFor({
+        n1: { x: 0, y: 0, width: 200, height: 80 },
+        n2: { x: 300, y: 0, width: 200, height: 80 },
+        o1: { x: 0, y: 0, width: 400, height: 200 },
+      }),
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    const heading = added[0];
+    expect(heading.position_x).toBeGreaterThan(0);
+    expect(heading.position_y).toBe(0);
+    const first = moved[0].find((move) => move.id === 'n1')!;
+    // Directly under its heading: heading.y + headingHeight(48) + gap(16).
+    expect(first.y).toBe(heading.position_y + 48 + 16);
+    // The slide is horizontal only: every note keeps the arrangement's y.
+    expect(moved[0].every((move) => move.y === first.y)).toBe(true);
+  });
+
+  it('a failed Undo says so instead of claiming success', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    const moved: Move[][] = [];
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async () => {},
+      // The arrange succeeds; the Undo's restore fails.
+      onMovePosts: async (moves) => { moved.push([...moves]); return moved.length === 1; },
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    const options = mocks.toast.success.mock.calls[0][1] as { action: { onClick: () => void } };
+    await act(async () => { options.action.onClick(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(mocks.toast).not.toHaveBeenCalledWith('Arrangement undone');
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "Couldn't fully undo the arrangement — some notes or headings may need moving back by hand.",
+    );
+  });
+
+  it('an incomplete rollback after a failed arrange says so', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async () => {},
+      // Both the move and the rollback fail.
+      onMovePosts: async () => false,
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "Couldn't arrange the notes, and the rollback was incomplete — some notes or headings may need moving back by hand.",
+    );
+  });
+
+  it('a heading delete that throws makes the Undo incomplete', async () => {
+    mocks.requestNotesAi.mockResolvedValue({ ok: true, result: THEMES_RESULT });
+    await mount({
+      selectedPadletIds: ['n1', 'n2'],
+      onAddPost: async () => {},
+      onMovePosts: async () => true,
+      onDeletePost: async () => { throw new Error('nope'); },
+      readPostRects: TWO_RECTS,
+    });
+    await openDialog();
+    await click('[data-notes-ai-tab="themes"]');
+    await click('[data-notes-ai-generate="true"]');
+    await click('[data-notes-ai-arrange="true"]');
+
+    const options = mocks.toast.success.mock.calls[0][1] as { action: { onClick: () => void } };
+    await act(async () => { options.action.onClick(); await Promise.resolve(); await Promise.resolve(); });
+
+    expect(mocks.toast.error).toHaveBeenCalledWith(
+      "Couldn't fully undo the arrangement — some notes or headings may need moving back by hand.",
+    );
   });
 });

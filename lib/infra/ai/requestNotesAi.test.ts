@@ -32,6 +32,20 @@ describe('PATCH-353 requestNotesAi', () => {
       .toEqual({ ok: true, result: { title: 'P', tasks: [{ text: 'A', sourceRefs: ['N1'] }] } });
   });
 
+  it('PATCH-354: validates the themes shape for action "themes"', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      result: { themes: [{ title: 'Venue', noteRefs: ['N1'] }] },
+    })));
+    expect(await requestNotesAi({ boardId: 'b1', action: 'themes', notes: NOTES }))
+      .toEqual({ ok: true, result: { themes: [{ title: 'Venue', noteRefs: ['N1'] }] } });
+  });
+
+  it('PATCH-354: a malformed themes body is a plain failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ result: { themes: [{ title: 5 }] } })));
+    expect(await requestNotesAi({ boardId: 'b1', action: 'themes', notes: NOTES }))
+      .toEqual({ ok: false, status: 0, message: 'The AI request failed.' });
+  });
+
   it('maps 402 to the out-of-credits message', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'nope' }, 402)));
     expect(await requestNotesAi({ boardId: 'b1', action: 'summary', notes: NOTES }))

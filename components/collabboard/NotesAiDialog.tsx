@@ -13,17 +13,35 @@ import { KNOWLEDGE_TEXT_BUTTON_CLASS } from '@/components/collabboard/knowledgeR
 import { noteToKanbanCard } from '@/lib/domain/canvas/noteToKanbanCard';
 import {
   NOTES_AI_MAX_NOTES,
+  NOTES_AI_THEME_TITLE_MAX,
   NOTES_AI_TOTAL_TEXT_MAX,
   type NotesAiAction,
   type NotesAiActionPlan,
   type NotesAiResult,
+  type NotesAiSummary,
+  type NotesAiThemes,
 } from '@/lib/domain/ai/notesAi';
 import { buildNotesAiNotes, type NotesAiDialogProps } from './useNotesAi';
 
 const NOTE_LABEL_MAX = 60;
+const THEME_NOTES_SHOWN = 5;
+
+const TAB_LABELS: Record<NotesAiAction, string> = {
+  summary: 'Summary',
+  action_plan: 'Action plan',
+  themes: 'Group by theme',
+};
 
 function isPlan(result: NotesAiResult): result is NotesAiActionPlan {
   return 'tasks' in result;
+}
+
+function isThemes(result: NotesAiResult): result is NotesAiThemes {
+  return 'themes' in result;
+}
+
+function isSummary(result: NotesAiResult): result is NotesAiSummary {
+  return !('tasks' in result) && !('themes' in result);
 }
 
 export function NotesAiDialog({
@@ -40,15 +58,23 @@ export function NotesAiDialog({
   error,
   onGenerate,
   onAdd,
+  themes,
+  onArrange,
+  arranging,
+  themesLeftOut,
 }: NotesAiDialogProps) {
   // Unticked tasks are left out; a fresh answer ticks everything again.
   const [unticked, setUnticked] = useState<ReadonlySet<number>>(new Set());
   useEffect(() => { setUnticked(new Set()); }, [result]);
+  // PATCH-354. Editable theme titles, reset with each answer.
+  const [themeTitles, setThemeTitles] = useState<readonly string[]>([]);
+  useEffect(() => { setThemeTitles(themes.map((theme) => theme.title)); }, [themes]);
 
   const selectedCount = selectedIds.length;
   const allSelected = notes.length > 0 && selectedCount === notes.length;
   const plan = result && isPlan(result) ? result : null;
-  const summary = result && !isPlan(result) ? result : null;
+  const themesResult = result && isThemes(result) ? result : null;
+  const summary = result && isSummary(result) ? result : null;
   const tickedTasks = plan ? plan.tasks.filter((_, index) => !unticked.has(index)) : [];
   const canAdd = summary !== null || tickedTasks.length > 0;
 
@@ -81,6 +107,13 @@ export function NotesAiDialog({
     onAdd(result);
   };
 
+  const handleArrange = () => {
+    onArrange(themes.map((theme, index) => ({
+      title: (themeTitles[index] ?? theme.title).slice(0, NOTES_AI_THEME_TITLE_MAX),
+      noteIds: theme.noteIds,
+    })));
+  };
+
   const tabClass = (value: NotesAiAction) => (
     action === value
       ? `${KNOWLEDGE_TEXT_BUTTON_CLASS} border-blue-300 bg-blue-50 text-blue-700`
@@ -108,7 +141,7 @@ export function NotesAiDialog({
 
         <div data-notes-ai-body="true" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div className="flex gap-1" role="tablist">
-            {(['summary', 'action_plan'] as const).map((value) => (
+            {(['summary', 'action_plan', 'themes'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -118,7 +151,7 @@ export function NotesAiDialog({
                 className={tabClass(value)}
                 onClick={() => onActionChange(value)}
               >
-                {value === 'summary' ? 'Summary' : 'Action plan'}
+                {TAB_LABELS[value]}
               </button>
             ))}
           </div>
@@ -162,17 +195,21 @@ export function NotesAiDialog({
             <p data-notes-ai-limit="true" className="text-sm text-amber-600">{limitMessage}</p>
           ) : null}
 
+          {action === 'themes' && themesLeftOut > 0 ? (
+            <p data-notes-ai-left-out="true" className="text-xs text-slate-500">
+              {themesLeftOut} {themesLeftOut === 1 ? 'note' : 'notes'} inside columns are left out.
+            </p>
+          ) : null}
+
           {error ? (
             <p data-notes-ai-error="true" className="text-sm text-red-600">{error}</p>
           ) : null}
 
           {result ? (
             <div data-notes-ai-preview="true" className="space-y-2 rounded-md border border-slate-200 p-3">
-              <p className="text-sm font-semibold text-slate-800">
-                {result.title || (plan ? 'Action plan' : 'Summary')}
-              </p>
               {summary ? (
                 <>
+                  <p className="text-sm font-semibold text-slate-800">{summary.title || 'Summary'}</p>
                   <p className="text-sm text-slate-700">{summary.summary}</p>
                   {summary.points.length > 0 ? (
                     <ul className="list-disc space-y-0.5 pl-5 text-sm text-slate-700">
@@ -181,24 +218,59 @@ export function NotesAiDialog({
                   ) : null}
                 </>
               ) : plan ? (
-                <ul className="space-y-1">
-                  {plan.tasks.map((task, index) => (
-                    <li key={index} data-notes-ai-task="true" className="flex items-start gap-2">
+                <>
+                  <p className="text-sm font-semibold text-slate-800">{plan.title || 'Action plan'}</p>
+                  <ul className="space-y-1">
+                    {plan.tasks.map((task, index) => (
+                      <li key={index} data-notes-ai-task="true" className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          data-notes-ai-task-checkbox="true"
+                          checked={!unticked.has(index)}
+                          onChange={() => toggleTask(index)}
+                          className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm text-slate-700">{task.text}</span>
+                          {task.sourceRefs.length > 0 ? (
+                            <span className="block text-[11px] text-slate-400">
+                              from {task.sourceRefs.length} {task.sourceRefs.length === 1 ? 'note' : 'notes'}
+                            </span>
+                          ) : null}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : themesResult ? (
+                <ul className="space-y-2">
+                  {themes.map((theme, index) => (
+                    <li key={index} data-notes-ai-theme="true" className="space-y-1 rounded-md border border-slate-200 p-2">
                       <input
-                        type="checkbox"
-                        data-notes-ai-task-checkbox="true"
-                        checked={!unticked.has(index)}
-                        onChange={() => toggleTask(index)}
-                        className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                        type="text"
+                        data-notes-ai-theme-title="true"
+                        value={themeTitles[index] ?? theme.title}
+                        maxLength={NOTES_AI_THEME_TITLE_MAX}
+                        onChange={(event) => setThemeTitles((current) => themes.map((entry, i) => (
+                          i === index ? event.target.value : current[i] ?? entry.title
+                        )))}
+                        className="w-full rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-blue-500"
                       />
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm text-slate-700">{task.text}</span>
-                        {task.sourceRefs.length > 0 ? (
-                          <span className="block text-[11px] text-slate-400">
-                            from {task.sourceRefs.length} {task.sourceRefs.length === 1 ? 'note' : 'notes'}
-                          </span>
+                      <ul className="space-y-0.5">
+                        {theme.noteIds.slice(0, THEME_NOTES_SHOWN).map((id) => {
+                          const note = notes.find((candidate) => candidate.id === id);
+                          return (
+                            <li key={id} className="truncate text-[11px] text-slate-400">
+                              {note ? noteToKanbanCard(note).title.slice(0, NOTE_LABEL_MAX) : id}
+                            </li>
+                          );
+                        })}
+                        {theme.noteIds.length > THEME_NOTES_SHOWN ? (
+                          <li className="text-[11px] text-slate-400">
+                            +{theme.noteIds.length - THEME_NOTES_SHOWN} more
+                          </li>
                         ) : null}
-                      </span>
+                      </ul>
                     </li>
                   ))}
                 </ul>
@@ -229,15 +301,27 @@ export function NotesAiDialog({
               </>
             ) : (result ? 'Regenerate' : 'Generate')}
           </button>
-          <button
-            type="button"
-            data-notes-ai-add="true"
-            onClick={handleAdd}
-            disabled={!canAdd || generating}
-            className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            Add to board
-          </button>
+          {action === 'themes' ? (
+            <button
+              type="button"
+              data-notes-ai-arrange="true"
+              onClick={handleArrange}
+              disabled={arranging || themes.length === 0}
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {arranging ? 'Arranging…' : 'Arrange on board'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-notes-ai-add="true"
+              onClick={handleAdd}
+              disabled={!canAdd || generating}
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Add to board
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

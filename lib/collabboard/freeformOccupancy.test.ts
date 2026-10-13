@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest';
-import { readFreeformOccupiedRects, readFreeformVisibleArea } from './freeformOccupancy';
+import { readFreeformOccupiedRects, readFreeformPostRects, readFreeformVisibleArea } from './freeformOccupancy';
 
 function rect(left: number, top: number, width: number, height: number): DOMRect {
   return {
@@ -101,5 +101,43 @@ describe('readFreeformOccupiedRects', () => {
     container.appendChild(zero);
 
     expect(readFreeformOccupiedRects(container, toWorld)).toEqual([{ x: 100, y: 100, width: 50, height: 60 }]);
+  });
+});
+
+describe('PATCH-354 readFreeformPostRects', () => {
+  it('returns every post rect by id, INCLUDING posts outside the container', () => {
+    const container = mountContainer();
+
+    const inside = stub(document.createElement('div'), rect(100, 100, 50, 60));
+    inside.setAttribute('data-padlet-id', 'inside');
+    container.appendChild(inside);
+
+    const outside = stub(document.createElement('div'), rect(2000, 2000, 80, 40));
+    outside.setAttribute('data-padlet-id', 'outside');
+    container.appendChild(outside);
+
+    const zero = stub(document.createElement('div'), rect(300, 300, 0, 0));
+    zero.setAttribute('data-padlet-id', 'zero');
+    container.appendChild(zero);
+
+    const rects = readFreeformPostRects(container, toWorld);
+    expect([...rects.keys()].sort()).toEqual(['inside', 'outside']);
+    expect(rects.get('outside')).toEqual({ x: 2000, y: 2000, width: 80, height: 40 });
+  });
+
+  it('filters to the given ids', () => {
+    const container = mountContainer();
+    const a = stub(document.createElement('div'), rect(10, 10, 50, 50));
+    a.setAttribute('data-padlet-id', 'a');
+    container.appendChild(a);
+    const b = stub(document.createElement('div'), rect(100, 100, 50, 50));
+    b.setAttribute('data-padlet-id', 'b');
+    container.appendChild(b);
+
+    expect([...readFreeformPostRects(container, toWorld, ['b']).keys()]).toEqual(['b']);
+  });
+
+  it('a null container is an empty map', () => {
+    expect(readFreeformPostRects(null, toWorld).size).toBe(0);
   });
 });

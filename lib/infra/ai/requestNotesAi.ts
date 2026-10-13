@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import type { NotesAiAction, NotesAiActionPlan, NotesAiResult, NotesAiSummary } from '@/lib/domain/ai/notesAi';
+import type { NotesAiAction, NotesAiResult } from '@/lib/domain/ai/notesAi';
 
 /**
  * PATCH-353. The one client-side caller of `POST /ai/notes-actions` (rule 1:
@@ -17,6 +17,10 @@ const summarySchema = z.object({
 });
 const taskSchema = z.object({ text: z.string(), sourceRefs: z.array(z.string()) });
 const planSchema = z.object({ title: z.string(), tasks: z.array(taskSchema) });
+// PATCH-354. Group by theme.
+const themesSchema = z.object({
+  themes: z.array(z.object({ title: z.string(), noteRefs: z.array(z.string()) })),
+});
 
 export type NotesAiRequestResult =
   | { readonly ok: true; readonly result: NotesAiResult | null }
@@ -51,10 +55,12 @@ export async function requestNotesAi(params: {
   }
 
   const body = await response.json().catch(() => null);
-  const schema = z.object({
-    result: (params.action === 'summary' ? summarySchema : planSchema).nullable(),
-  });
-  const parsed = schema.safeParse(body);
+  const resultSchema = params.action === 'summary'
+    ? summarySchema
+    : params.action === 'themes'
+      ? themesSchema
+      : planSchema;
+  const parsed = z.object({ result: resultSchema.nullable() }).safeParse(body);
   if (!parsed.success) return { ok: false, status: 0, message: FAILED };
-  return { ok: true, result: parsed.data.result as NotesAiSummary | NotesAiActionPlan | null };
+  return { ok: true, result: parsed.data.result as NotesAiResult | null };
 }

@@ -136,7 +136,8 @@ import {
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { attemptTimelineAutoInitOnce, TIMELINE_AUTO_INIT_FAILURE_TOAST } from '@/lib/domain/canvas/timelineAutoInit';
 import { findFreeSpot } from '@/lib/domain/canvas/freeformFreeSpot';
-import { readFreeformOccupiedRects, readFreeformVisibleArea } from '@/lib/collabboard/freeformOccupancy';
+import { readFreeformOccupiedRects, readFreeformPostRects, readFreeformVisibleArea } from '@/lib/collabboard/freeformOccupancy';
+import { moveNotesForArrangement, notesAiPositionUpdater } from '@/components/collabboard/notesAiArrange';
 import { hasBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -288,6 +289,7 @@ import {
   SECTION_HEADING_DEFAULT_LEVEL,
   SECTION_HEADING_DEFAULT_TEXT,
   SECTION_HEADING_DEFAULT_WIDTH,
+  isSectionHeading,
 } from '@/components/collabboard/canvas/engine/sectionHeading';
 
 // === BEGIN TYPES + CONSTANTS REGION ===
@@ -2277,15 +2279,19 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
    * settling when the ask arrives.
    *
    * Every step fails closed rather than moving the camera on a guess: an
-   * unknown id, a post that is not a Note, a Note grouped into a container
-   * whose parent cannot be resolved, an unmeasurable viewport. Each returns
-   * null, and null means stay put -- panning to arbitrary coordinates because
-   * a number was missing is worse than doing nothing.
+   * unknown id, a post that is neither a Note nor a Section Heading, a Note
+   * grouped into a container whose parent cannot be resolved, an unmeasurable
+   * viewport. Each returns null, and null means stay put -- panning to
+   * arbitrary coordinates because a number was missing is worse than doing
+   * nothing.
+   *
+   * PATCH-354: a Section Heading is revealable too, so "Arrange on board" can
+   * show the camera the columns it just made.
    */
   useEffect(() => {
     if (!boardRevealRequest || !isFreeformLayout) return;
     const target = padlets.find((padlet) => padlet.id === boardRevealRequest.targetPadletId);
-    if (!target || !isKnowledgeBacklinkNote(target)) return;
+    if (!target || !(isKnowledgeBacklinkNote(target) || isSectionHeading(target))) return;
 
     const viewport = containerRef.current;
     const worldOrigin = freeformWorldOriginRef.current;
@@ -7143,6 +7149,11 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       if (!created) throw new Error('post_insert_failed');
       setPadlets((current) => [...current, created]);
     },
+    // PATCH-354. Group by theme: rendered sizes, the moves, delete + reveal.
+    readPostRects: (ids) => readFreeformPostRects(containerRef.current, getCanvasPointFromClient, ids),
+    onMovePosts: (moves) => moveNotesForArrangement(moves, (positions) => setPadlets(notesAiPositionUpdater(positions))),
+    onDeletePost: async (id) => { await deletePostOrThrow(id); },
+    onReveal: (id) => { boardRevealRequestIdRef.current += 1; setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: id }); },
   });
 
   // Live chip data: one read per board load, refreshed on focus and every 60 s.

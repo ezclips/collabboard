@@ -170,6 +170,21 @@ describe('PATCH-353 notes-actions: generation', () => {
     });
   });
 
+  it('PATCH-354: returns the parsed themes', async () => {
+    mocks.generateText.mockResolvedValue(JSON.stringify({ themes: [
+      { title: 'Venue', noteRefs: ['N1'] },
+      { title: 'Other', noteRefs: ['N2'] },
+    ] }));
+    const response = await post(base({ action: 'themes' }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      result: { themes: [
+        { title: 'Venue', noteRefs: ['N1'] },
+        { title: 'Other', noteRefs: ['N2'] },
+      ] },
+    });
+  });
+
   it('sends ONLY refs, titles and texts -- no ids, emails or board names', async () => {
     await post(base());
     const input = mocks.generateText.mock.calls[0][0] as Record<string, unknown>;

@@ -8,9 +8,9 @@
  * anywhere: the user reviews the answer and "Add to board" is the only write.
  */
 
-export type NotesAiAction = 'summary' | 'action_plan';
+export type NotesAiAction = 'summary' | 'action_plan' | 'themes';
 
-export const NOTES_AI_ACTIONS: readonly NotesAiAction[] = ['summary', 'action_plan'];
+export const NOTES_AI_ACTIONS: readonly NotesAiAction[] = ['summary', 'action_plan', 'themes'];
 
 /** Input limits: what may be sent to the model. */
 export const NOTES_AI_MAX_NOTES = 60;
@@ -25,6 +25,13 @@ export const NOTES_AI_POINTS_MAX = 8;
 export const NOTES_AI_POINT_MAX = 200;
 export const NOTES_AI_TASKS_MAX = 15;
 export const NOTES_AI_TASK_TEXT_MAX = 160;
+
+/** PATCH-354. Group by theme. */
+export const NOTES_AI_THEMES_MIN = 2;
+export const NOTES_AI_THEMES_MAX = 8;
+export const NOTES_AI_THEME_TITLE_MAX = 40;
+/** The theme a note lands in when it fits nowhere. */
+export const NOTES_AI_THEME_OTHER = 'Other';
 
 /** The opaque ref a note is sent under: N1..N60. */
 export function notesAiRef(index: number): string {
@@ -47,7 +54,17 @@ export interface NotesAiActionPlan {
   readonly tasks: readonly NotesAiTask[];
 }
 
-export type NotesAiResult = NotesAiSummary | NotesAiActionPlan;
+/** One theme: a short name and the notes that belong to it. */
+export interface NotesAiTheme {
+  readonly title: string;
+  readonly noteRefs: readonly string[];
+}
+
+export interface NotesAiThemes {
+  readonly themes: readonly NotesAiTheme[];
+}
+
+export type NotesAiResult = NotesAiSummary | NotesAiActionPlan | NotesAiThemes;
 
 /** The rules every action's prompt shares. */
 export const NOTES_AI_COMMON_RULES: readonly string[] = [
@@ -69,6 +86,16 @@ export function notesAiSystemPrompt(action: NotesAiAction): string {
       `- title: a short heading, at most ${NOTES_AI_RESULT_TITLE_MAX} characters.`,
       `- summary: 2 to 4 sentences, at most ${NOTES_AI_SUMMARY_MAX} characters.`,
       `- points: 0 to ${NOTES_AI_POINTS_MAX} short points, each at most ${NOTES_AI_POINT_MAX} characters.`,
+      'Answer with ONLY that JSON.',
+    ].join('\n');
+  }
+  if (action === 'themes') {
+    return [
+      ...NOTES_AI_COMMON_RULES,
+      `Sort the notes into ${NOTES_AI_THEMES_MIN} to ${NOTES_AI_THEMES_MAX} themes as JSON: {"themes": [{"title": "...", "noteRefs": ["N1"]}]}.`,
+      `- title: a short theme name, at most ${NOTES_AI_THEME_TITLE_MAX} characters.`,
+      '- Every note belongs to exactly one theme.',
+      `- A note that fits no theme goes to a theme titled "${NOTES_AI_THEME_OTHER}".`,
       'Answer with ONLY that JSON.',
     ].join('\n');
   }
@@ -144,6 +171,63 @@ function parseActionPlan(parsed: unknown, known: ReadonlySet<string>): NotesAiAc
   return { title, tasks };
 }
 
+/** Put refs into the "Other" theme, creating it if the model did not. */
+function mergeIntoOther(
+  themes: { title: string; noteRefs: string[] }[],
+  refs: readonly string[],
+): void {
+  const other = themes.find((theme) => theme.title === NOTES_AI_THEME_OTHER);
+  if (other) {
+    for (const ref of refs) if (!other.noteRefs.includes(ref)) other.noteRefs.push(ref);
+    return;
+  }
+  themes.push({ title: NOTES_AI_THEME_OTHER, noteRefs: [...refs] });
+}
+
+function parseThemes(
+  parsed: unknown,
+  known: ReadonlySet<string>,
+  order: readonly string[],
+): NotesAiThemes | null {
+  const record = asRecord(parsed);
+  if (!record || !Array.isArray(record.themes)) return null;
+  const seen = new Set<string>();
+  const themes: { title: string; noteRefs: string[] }[] = [];
+  for (const entry of record.themes) {
+    const theme = asRecord(entry);
+    if (!theme) continue;
+    const title = typeof theme.title === 'string'
+      ? theme.title.trim().slice(0, NOTES_AI_THEME_TITLE_MAX)
+      : '';
+    if (title.length === 0) continue;
+    const noteRefs: string[] = [];
+    for (const ref of Array.isArray(theme.noteRefs) ? theme.noteRefs : []) {
+      // Unknown refs are dropped, and a ref already used keeps its FIRST theme.
+      if (typeof ref !== 'string' || !known.has(ref) || seen.has(ref)) continue;
+      seen.add(ref);
+      noteRefs.push(ref);
+    }
+    if (noteRefs.length === 0) continue;
+    themes.push({ title, noteRefs });
+  }
+
+  // Over the cap: the smallest themes are merged into "Other".
+  while (themes.length > NOTES_AI_THEMES_MAX) {
+    let smallest = 0;
+    for (let index = 1; index < themes.length; index += 1) {
+      if (themes[index].noteRefs.length < themes[smallest].noteRefs.length) smallest = index;
+    }
+    const [removed] = themes.splice(smallest, 1);
+    mergeIntoOther(themes, removed.noteRefs);
+  }
+
+  // Refs the model left out go to "Other" (created if missing).
+  const missing = order.filter((ref) => !seen.has(ref));
+  if (missing.length > 0) mergeIntoOther(themes, missing);
+
+  return themes.length > 0 ? { themes } : null;
+}
+
 export function parseNotesAiResponse(
   action: 'summary',
   raw: string,
@@ -155,15 +239,20 @@ export function parseNotesAiResponse(
   refs: ReadonlySet<string> | readonly string[],
 ): NotesAiActionPlan | null;
 export function parseNotesAiResponse(
-  action: NotesAiAction,
+  action: 'themes',
   raw: string,
   refs: ReadonlySet<string> | readonly string[],
-): NotesAiSummary | NotesAiActionPlan | null;
+): NotesAiThemes | null;
 export function parseNotesAiResponse(
   action: NotesAiAction,
   raw: string,
   refs: ReadonlySet<string> | readonly string[],
-): NotesAiSummary | NotesAiActionPlan | null {
+): NotesAiResult | null;
+export function parseNotesAiResponse(
+  action: NotesAiAction,
+  raw: string,
+  refs: ReadonlySet<string> | readonly string[],
+): NotesAiResult | null {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   const known = refs instanceof Set ? refs : new Set(refs);
   const body = extractJsonObject(raw);
@@ -174,7 +263,9 @@ export function parseNotesAiResponse(
   } catch {
     return null;
   }
-  return action === 'summary' ? parseSummary(parsed) : parseActionPlan(parsed, known);
+  if (action === 'summary') return parseSummary(parsed);
+  if (action === 'themes') return parseThemes(parsed, known, [...refs]);
+  return parseActionPlan(parsed, known);
 }
 
 function escapeHtml(text: string): string {

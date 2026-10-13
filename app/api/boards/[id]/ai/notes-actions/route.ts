@@ -40,7 +40,8 @@ const refSchema = z.string().regex(/^N([1-9]|[1-5][0-9]|60)$/);
 
 const notesActionsRequestSchema = z
   .object({
-    action: z.enum(['summary', 'action_plan']),
+    // PATCH-354 adds 'themes' (Group by theme); same limits, credit, feature.
+    action: z.enum(['summary', 'action_plan', 'themes']),
     notes: z
       .array(
         z
@@ -57,7 +58,7 @@ const notesActionsRequestSchema = z
   .strict();
 
 type NotesActionsBody = {
-  readonly action: 'summary' | 'action_plan';
+  readonly action: 'summary' | 'action_plan' | 'themes';
   readonly notes: readonly { readonly ref: string; readonly title: string; readonly text: string }[];
 };
 
