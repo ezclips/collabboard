@@ -81,4 +81,35 @@ describe('PATCH-353 requestNotesAi', () => {
     expect(await requestNotesAi({ boardId: 'b1', action: 'summary', notes: NOTES }))
       .toEqual({ ok: false, status: 0, message: 'The AI request failed.' });
   });
+
+  it('PATCH-355: sends the language and segments, and validates the translation shape', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse({
+      result: { notes: [{ ref: 'N1', title: 'Ort', segments: ['Buche'] }], failedRefs: [] },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await requestNotesAi({
+      boardId: 'b1',
+      action: 'translate',
+      language: 'German',
+      notes: [{ ref: 'N1', title: 'Venue', segments: ['Book'] }],
+    });
+    expect(response).toEqual({
+      ok: true,
+      result: { notes: [{ ref: 'N1', title: 'Ort', segments: ['Buche'] }], failedRefs: [] },
+    });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      action: 'translate',
+      language: 'German',
+      notes: [{ ref: 'N1', title: 'Venue', segments: ['Book'] }],
+    });
+  });
+
+  it('PATCH-355: a malformed translation body is a plain failure', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ result: { notes: [{ ref: 'N1' }] } })));
+    expect(await requestNotesAi({
+      boardId: 'b1', action: 'translate', language: 'German',
+      notes: [{ ref: 'N1', title: '', segments: ['a'] }],
+    })).toEqual({ ok: false, status: 0, message: 'The AI request failed.' });
+  });
 });

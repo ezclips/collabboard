@@ -138,6 +138,7 @@ import { attemptTimelineAutoInitOnce, TIMELINE_AUTO_INIT_FAILURE_TOAST } from '@
 import { findFreeSpot } from '@/lib/domain/canvas/freeformFreeSpot';
 import { readFreeformOccupiedRects, readFreeformPostRects, readFreeformVisibleArea } from '@/lib/collabboard/freeformOccupancy';
 import { moveNotesForArrangement, notesAiPositionUpdater } from '@/components/collabboard/notesAiArrange';
+import { notesAiFieldUpdater, updateNotesForTranslate } from '@/components/collabboard/notesAiUpdate';
 import { hasBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 import { storeEditedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { clearKnowledgeAreaDraftPreview, takeKnowledgeAreaDraftPreview } from '@/lib/infra/knowledge/knowledgeAreaDraftPreview';
@@ -7154,6 +7155,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     onMovePosts: (moves) => moveNotesForArrangement(moves, (positions) => setPadlets(notesAiPositionUpdater(positions))),
     onDeletePost: async (id) => { await deletePostOrThrow(id); },
     onReveal: (id) => { boardRevealRequestIdRef.current += 1; setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: id }); },
+    // PATCH-355. Apply translation: optimistic title/content, then persisted.
+    onUpdateNotes: (updates) => updateNotesForTranslate(updates, (fields) => setPadlets(notesAiFieldUpdater(fields))),
   });
 
   // Live chip data: one read per board load, refreshed on focus and every 60 s.

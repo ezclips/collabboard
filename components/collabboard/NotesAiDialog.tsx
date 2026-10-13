@@ -1,9 +1,12 @@
 'use client';
 
 /**
- * PATCH-353. "AI on notes": pick notes, choose Summary or Action plan, generate,
- * review, and Add to board. The dialog only shows and chooses; the hook owns the
- * state and the one write.
+ * PATCH-353. "AI on notes": pick notes, choose Summary, Action plan, Group by
+ * theme or Translate, generate, review, and act. The dialog only shows and
+ * chooses; the hook owns the state and the writes.
+ *
+ * PATCH-355: the per-action preview moved to `NotesAiPreview.tsx` so this file
+ * stays under the 400-line ceiling.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -12,37 +15,27 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { KNOWLEDGE_TEXT_BUTTON_CLASS } from '@/components/collabboard/knowledgeReaderControls';
 import { noteToKanbanCard } from '@/lib/domain/canvas/noteToKanbanCard';
 import {
+  NOTES_AI_LANGUAGES,
   NOTES_AI_MAX_NOTES,
   NOTES_AI_THEME_TITLE_MAX,
   NOTES_AI_TOTAL_TEXT_MAX,
+  NOTES_AI_TRANSLATE_TOTAL_MAX,
   type NotesAiAction,
   type NotesAiActionPlan,
-  type NotesAiResult,
   type NotesAiSummary,
-  type NotesAiThemes,
 } from '@/lib/domain/ai/notesAi';
 import { buildNotesAiNotes, type NotesAiDialogProps } from './useNotesAi';
+import { NOTES_AI_LANGUAGE_OTHER, buildNotesAiTranslation, isSyncedNote } from './useNotesAiTranslate';
+import { NotesAiPreview } from './NotesAiPreview';
 
 const NOTE_LABEL_MAX = 60;
-const THEME_NOTES_SHOWN = 5;
 
 const TAB_LABELS: Record<NotesAiAction, string> = {
   summary: 'Summary',
   action_plan: 'Action plan',
   themes: 'Group by theme',
+  translate: 'Translate',
 };
-
-function isPlan(result: NotesAiResult): result is NotesAiActionPlan {
-  return 'tasks' in result;
-}
-
-function isThemes(result: NotesAiResult): result is NotesAiThemes {
-  return 'themes' in result;
-}
-
-function isSummary(result: NotesAiResult): result is NotesAiSummary {
-  return !('tasks' in result) && !('themes' in result);
-}
 
 export function NotesAiDialog({
   isOpen,
@@ -62,38 +55,75 @@ export function NotesAiDialog({
   onArrange,
   arranging,
   themesLeftOut,
+  languageChoice,
+  onLanguageChoiceChange,
+  otherLanguage,
+  onOtherLanguageChange,
+  targetLanguage,
+  languageValid,
+  translations,
+  failedCount,
+  syncedLeftOut,
+  applying,
+  onApply,
 }: NotesAiDialogProps) {
+  const isTranslate = action === 'translate';
   // Unticked tasks are left out; a fresh answer ticks everything again.
   const [unticked, setUnticked] = useState<ReadonlySet<number>>(new Set());
   useEffect(() => { setUnticked(new Set()); }, [result]);
+  // PATCH-355. Unticked translations are left out; reset with each answer.
+  const [untickedTranslations, setUntickedTranslations] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => { setUntickedTranslations(new Set()); }, [result]);
   // PATCH-354. Editable theme titles, reset with each answer.
   const [themeTitles, setThemeTitles] = useState<readonly string[]>([]);
   useEffect(() => { setThemeTitles(themes.map((theme) => theme.title)); }, [themes]);
 
-  const selectedCount = selectedIds.length;
-  const allSelected = notes.length > 0 && selectedCount === notes.length;
-  const plan = result && isPlan(result) ? result : null;
-  const themesResult = result && isThemes(result) ? result : null;
-  const summary = result && isSummary(result) ? result : null;
+  // Translate leaves synced notes out entirely, so they are not listed there.
+  const selectableNotes = isTranslate ? notes.filter((note) => !isSyncedNote(note)) : notes;
+  const selectedCount = selectableNotes.filter((note) => selectedIds.includes(note.id)).length;
+  const allSelected = selectableNotes.length > 0 && selectedCount === selectableNotes.length;
+  const plan = result && 'tasks' in result ? (result as NotesAiActionPlan) : null;
+  const summary = result && 'summary' in result ? (result as NotesAiSummary) : null;
   const tickedTasks = plan ? plan.tasks.filter((_, index) => !unticked.has(index)) : [];
   const canAdd = summary !== null || tickedTasks.length > 0;
 
   // PATCH-353 Addendum 1. The same payload builder the request uses, so the
-  // size check and the request can never disagree. "Select all" on a big board
-  // still ticks every note -- this only says why Generate is off.
+  // size check and the request can never disagree.
   const payload = buildNotesAiNotes(notes.filter((note) => selectedIds.includes(note.id)));
   const totalChars = payload.reduce((sum, entry) => sum + entry.title.length + entry.text.length, 0);
-  const limitMessage = payload.length > NOTES_AI_MAX_NOTES
-    ? `Pick at most ${NOTES_AI_MAX_NOTES} notes (${payload.length} ticked).`
-    : totalChars > NOTES_AI_TOTAL_TEXT_MAX
-      ? 'These notes are too long together — untick a few.'
-      : null;
+  const translationPayload = isTranslate
+    ? buildNotesAiTranslation(notes.filter((note) => selectedIds.includes(note.id) && !isSyncedNote(note)))
+    : [];
+  const translationChars = translationPayload.reduce(
+    (sum, entry) => sum + entry.title.length + entry.segments.reduce((chars, segment) => chars + segment.length, 0),
+    0,
+  );
+  const limitMessage = isTranslate
+    ? translationPayload.length > NOTES_AI_MAX_NOTES
+      ? `Pick at most ${NOTES_AI_MAX_NOTES} notes (${translationPayload.length} ticked).`
+      : translationChars > NOTES_AI_TRANSLATE_TOTAL_MAX
+        ? 'These notes are too long to translate together — untick a few.'
+        : null
+    : payload.length > NOTES_AI_MAX_NOTES
+      ? `Pick at most ${NOTES_AI_MAX_NOTES} notes (${payload.length} ticked).`
+      : totalChars > NOTES_AI_TOTAL_TEXT_MAX
+        ? 'These notes are too long together — untick a few.'
+        : null;
 
   const toggleTask = (index: number) => {
     setUnticked((current) => {
       const next = new Set(current);
       if (next.has(index)) next.delete(index);
       else next.add(index);
+      return next;
+    });
+  };
+
+  const toggleTranslation = (noteId: string) => {
+    setUntickedTranslations((current) => {
+      const next = new Set(current);
+      if (next.has(noteId)) next.delete(noteId);
+      else next.add(noteId);
       return next;
     });
   };
@@ -114,11 +144,18 @@ export function NotesAiDialog({
     })));
   };
 
+  const handleApply = () => {
+    onApply(translations.filter((entry) => !untickedTranslations.has(entry.noteId)).map((entry) => entry.noteId));
+  };
+
   const tabClass = (value: NotesAiAction) => (
     action === value
       ? `${KNOWLEDGE_TEXT_BUTTON_CLASS} border-blue-300 bg-blue-50 text-blue-700`
       : KNOWLEDGE_TEXT_BUTTON_CLASS
   );
+
+  const generateDisabled = selectedCount === 0 || generating || limitMessage !== null
+    || (isTranslate && !languageValid);
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -135,13 +172,13 @@ export function NotesAiDialog({
             AI on notes
           </DialogTitle>
           <DialogDescription>
-            Summarise or plan the notes you select. Nothing is added until you press Add to board.
+            Summarise, plan, group or translate the notes you select. Nothing is written until you press a button.
           </DialogDescription>
         </DialogHeader>
 
         <div data-notes-ai-body="true" className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div className="flex gap-1" role="tablist">
-            {(['summary', 'action_plan', 'themes'] as const).map((value) => (
+            {(['summary', 'action_plan', 'themes', 'translate'] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -156,10 +193,47 @@ export function NotesAiDialog({
             ))}
           </div>
 
+          {isTranslate ? (
+            <div className="space-y-1">
+              <label className="block text-xs font-medium text-slate-600" htmlFor="notes-ai-language">
+                Translate into
+              </label>
+              <select
+                id="notes-ai-language"
+                data-notes-ai-language="true"
+                value={languageChoice}
+                onChange={(event) => onLanguageChoiceChange(event.target.value)}
+                className="w-full rounded border border-slate-200 px-2 py-1 text-sm"
+              >
+                {NOTES_AI_LANGUAGES.map((language) => (
+                  <option key={language} value={language}>{language}</option>
+                ))}
+                <option value={NOTES_AI_LANGUAGE_OTHER}>Other…</option>
+              </select>
+              {languageChoice === NOTES_AI_LANGUAGE_OTHER ? (
+                <>
+                  <input
+                    type="text"
+                    data-notes-ai-language-other="true"
+                    value={otherLanguage}
+                    placeholder="Language name"
+                    onChange={(event) => onOtherLanguageChange(event.target.value)}
+                    className="w-full rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-blue-500"
+                  />
+                  {otherLanguage.trim().length > 0 && !languageValid ? (
+                    <p data-notes-ai-language-invalid="true" className="text-xs text-amber-600">
+                      Enter a language name (letters only).
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="space-y-1">
             <div className="flex items-center justify-between">
               <span data-notes-ai-count="true" className="text-sm font-medium text-slate-700">
-                {selectedCount} of {notes.length} notes
+                {selectedCount} of {selectableNotes.length} notes
               </span>
               <button
                 type="button"
@@ -171,7 +245,7 @@ export function NotesAiDialog({
               </button>
             </div>
             <div className="max-h-[200px] overflow-y-auto rounded-md border border-slate-200">
-              {notes.map((note) => (
+              {selectableNotes.map((note) => (
                 <label
                   key={note.id}
                   className="flex cursor-pointer items-center gap-2 border-b border-slate-100 px-2 py-1.5 text-sm last:border-b-0 hover:bg-slate-50"
@@ -201,81 +275,32 @@ export function NotesAiDialog({
             </p>
           ) : null}
 
+          {isTranslate && syncedLeftOut > 0 ? (
+            <p data-notes-ai-left-out="true" className="text-xs text-slate-500">
+              {syncedLeftOut} synced {syncedLeftOut === 1 ? 'note is' : 'notes are'} left out.
+            </p>
+          ) : null}
+
           {error ? (
             <p data-notes-ai-error="true" className="text-sm text-red-600">{error}</p>
           ) : null}
 
           {result ? (
-            <div data-notes-ai-preview="true" className="space-y-2 rounded-md border border-slate-200 p-3">
-              {summary ? (
-                <>
-                  <p className="text-sm font-semibold text-slate-800">{summary.title || 'Summary'}</p>
-                  <p className="text-sm text-slate-700">{summary.summary}</p>
-                  {summary.points.length > 0 ? (
-                    <ul className="list-disc space-y-0.5 pl-5 text-sm text-slate-700">
-                      {summary.points.map((point, index) => <li key={index}>{point}</li>)}
-                    </ul>
-                  ) : null}
-                </>
-              ) : plan ? (
-                <>
-                  <p className="text-sm font-semibold text-slate-800">{plan.title || 'Action plan'}</p>
-                  <ul className="space-y-1">
-                    {plan.tasks.map((task, index) => (
-                      <li key={index} data-notes-ai-task="true" className="flex items-start gap-2">
-                        <input
-                          type="checkbox"
-                          data-notes-ai-task-checkbox="true"
-                          checked={!unticked.has(index)}
-                          onChange={() => toggleTask(index)}
-                          className="mt-0.5 h-3.5 w-3.5 shrink-0"
-                        />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm text-slate-700">{task.text}</span>
-                          {task.sourceRefs.length > 0 ? (
-                            <span className="block text-[11px] text-slate-400">
-                              from {task.sourceRefs.length} {task.sourceRefs.length === 1 ? 'note' : 'notes'}
-                            </span>
-                          ) : null}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              ) : themesResult ? (
-                <ul className="space-y-2">
-                  {themes.map((theme, index) => (
-                    <li key={index} data-notes-ai-theme="true" className="space-y-1 rounded-md border border-slate-200 p-2">
-                      <input
-                        type="text"
-                        data-notes-ai-theme-title="true"
-                        value={themeTitles[index] ?? theme.title}
-                        maxLength={NOTES_AI_THEME_TITLE_MAX}
-                        onChange={(event) => setThemeTitles((current) => themes.map((entry, i) => (
-                          i === index ? event.target.value : current[i] ?? entry.title
-                        )))}
-                        className="w-full rounded border border-slate-200 px-2 py-1 text-sm outline-none focus:border-blue-500"
-                      />
-                      <ul className="space-y-0.5">
-                        {theme.noteIds.slice(0, THEME_NOTES_SHOWN).map((id) => {
-                          const note = notes.find((candidate) => candidate.id === id);
-                          return (
-                            <li key={id} className="truncate text-[11px] text-slate-400">
-                              {note ? noteToKanbanCard(note).title.slice(0, NOTE_LABEL_MAX) : id}
-                            </li>
-                          );
-                        })}
-                        {theme.noteIds.length > THEME_NOTES_SHOWN ? (
-                          <li className="text-[11px] text-slate-400">
-                            +{theme.noteIds.length - THEME_NOTES_SHOWN} more
-                          </li>
-                        ) : null}
-                      </ul>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
+            <NotesAiPreview
+              result={result}
+              notes={notes}
+              themes={themes}
+              themeTitles={themeTitles}
+              onThemeTitleChange={(index, value) => setThemeTitles((current) => themes.map((entry, i) => (
+                i === index ? value : current[i] ?? entry.title
+              )))}
+              unticked={unticked}
+              onToggleTask={toggleTask}
+              translations={translations}
+              untickedTranslations={untickedTranslations}
+              onToggleTranslation={toggleTranslation}
+              failedCount={failedCount}
+            />
           ) : null}
         </div>
 
@@ -291,7 +316,7 @@ export function NotesAiDialog({
             type="button"
             data-notes-ai-generate="true"
             onClick={onGenerate}
-            disabled={selectedCount === 0 || generating || limitMessage !== null}
+            disabled={generateDisabled}
             className="inline-flex items-center gap-1.5 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {generating ? (
@@ -301,7 +326,17 @@ export function NotesAiDialog({
               </>
             ) : (result ? 'Regenerate' : 'Generate')}
           </button>
-          {action === 'themes' ? (
+          {isTranslate ? (
+            <button
+              type="button"
+              data-notes-ai-apply="true"
+              onClick={handleApply}
+              disabled={applying || translations.length === 0}
+              className="rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {applying ? 'Translating…' : 'Apply translation'}
+            </button>
+          ) : action === 'themes' ? (
             <button
               type="button"
               data-notes-ai-arrange="true"

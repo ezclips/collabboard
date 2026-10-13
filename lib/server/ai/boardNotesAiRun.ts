@@ -64,7 +64,10 @@ export interface BoardNotesAiRunInput<TBody> {
   readonly rateLimit: (userId: string) => boolean;
   readonly feature: AiCreditFeature;
   readonly cost: number;
-  readonly maxTokens: number;
+  /** A fixed cap, or one chosen from the parsed body (translate is larger). */
+  readonly maxTokens: number | ((body: TBody) => number);
+  /** A fixed clock in ms, or one chosen from the parsed body. Default 25 s. */
+  readonly timeoutMs?: number | ((body: TBody) => number);
   readonly parseBody: (body: unknown) => BoardNotesAiBodyParse<TBody>;
   readonly buildPrompt: (body: TBody, boardId: string) => {
     readonly system: string;
@@ -144,7 +147,11 @@ export async function runBoardNotesAi<TBody>(
     const adapter = getAIProviderAdapter(resolved.provider);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), BOARD_NOTES_AI_TIMEOUT_MS);
+    const maxTokens = typeof input.maxTokens === 'function' ? input.maxTokens(parsed.value) : input.maxTokens;
+    const timeoutMs = typeof input.timeoutMs === 'function'
+      ? input.timeoutMs(parsed.value)
+      : input.timeoutMs ?? BOARD_NOTES_AI_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let raw: string;
     try {
       const prompt = input.buildPrompt(parsed.value, boardId);
@@ -154,7 +161,7 @@ export async function runBoardNotesAi<TBody>(
         system: prompt.system,
         // Only the route's own payload -- never ids, emails or board names.
         user: prompt.user,
-        maxTokens: input.maxTokens,
+        maxTokens,
         reasoning: 'off',
         signal: controller.signal,
       });

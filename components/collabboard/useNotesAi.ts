@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * PATCH-353/354. "AI on notes": the state, the open rule and the writes.
- *
- * The dialog is presentational; this hook owns which notes are candidates, the
- * pre-tick rule, the generate call, "Add to board" and "Arrange on board" (group
- * by theme). The ref -> note map never leaves this hook: only refs, titles and
- * texts are sent, and NOTHING is written until the user presses a button.
+ * PATCH-353/354/355. "AI on notes": the state, the open rule and the generate
+ * call. The dialog is presentational; this hook owns which notes are candidates,
+ * the pre-tick rule, the generate call, "Add to board", and composes the two
+ * split-out flows -- "Group by theme" (`useNotesAiArrange`) and "Translate"
+ * (`useNotesAiTranslate`). The ref -> note map never leaves this hook: only refs,
+ * titles and texts (or segments) are sent, and NOTHING is written until the user
+ * presses a button.
  */
 
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -25,19 +26,22 @@ import {
   type NotesAiResult,
   type NotesAiSummary,
 } from '@/lib/domain/ai/notesAi';
-import { arrangeThemes, slideClear } from '@/lib/domain/canvas/themeArrangement';
 import type { WorldRect } from '@/lib/domain/canvas/freeformFreeSpot';
-import { clampRectPositionToFreeformBounds } from '@/components/collabboard/canvas/engine/freeformStageGeometry';
-import { SECTION_HEADING_LEVEL_HEIGHT, SECTION_HEADING_TYPE } from '@/components/collabboard/canvas/engine/sectionHeading';
-import type { NotesAiPositionMove } from './notesAiArrange';
 import { requestNotesAi } from '@/lib/infra/ai/requestNotesAi';
-
-/** The theme headings are always created at this level. */
-const NOTES_AI_HEADING_LEVEL = 3;
+import type { NotesAiPositionMove } from './notesAiArrange';
+import type { NotesAiFieldUpdate } from './notesAiUpdate';
+import { useNotesAiArrange } from './useNotesAiArrange';
+import {
+  buildNotesAiTranslation,
+  isSyncedNote,
+  useNotesAiTranslate,
+  type NotesAiTranslationPreview,
+} from './useNotesAiTranslate';
 
 /**
- * The ONE payload builder: the hook's request and the dialog's size check both
- * call it, so what is sent and what is checked cannot disagree.
+ * The ONE payload builder for the generative actions: the hook's request and the
+ * dialog's size check both call it, so what is sent and what is checked cannot
+ * disagree.
  *
  * PATCH-353 Addendum 1: `title` is the note's OWN title (empty when it has
  * none) and `text` is the full plain text -- the old `noteToKanbanCard` title
@@ -101,32 +105,6 @@ export function buildNotesAiActionPlanRow(result: NotesAiActionPlan, context: No
   };
 }
 
-/** PATCH-354. One theme's heading: a level-3 Section Heading, `title` = theme. */
-export function buildNotesAiHeadingRow(
-  title: string,
-  context: NotesAiRowContext & { readonly width: number },
-): Padlet {
-  return {
-    id: context.id,
-    board_id: context.boardId,
-    title: title || 'Theme',
-    content: '',
-    type: SECTION_HEADING_TYPE,
-    position_x: context.positionX,
-    position_y: context.positionY,
-    width: context.width,
-    height: SECTION_HEADING_LEVEL_HEIGHT[NOTES_AI_HEADING_LEVEL],
-    created_at: context.nowIso,
-    updated_at: context.nowIso,
-    metadata: { headingLevel: NOTES_AI_HEADING_LEVEL, zIndex: context.zIndex },
-  };
-}
-
-/** A note drawn inside a column owns no free position, so it cannot be arranged. */
-function isInsideColumn(note: Padlet): boolean {
-  return Boolean((note.metadata as { parentId?: unknown } | undefined)?.parentId);
-}
-
 /** One theme as the dialog sees it: a name and the notes' board ids. */
 export interface NotesAiThemePreview {
   readonly title: string;
@@ -154,6 +132,20 @@ export interface NotesAiDialogProps {
   readonly arranging: boolean;
   /** Ticked notes that sit inside a column, so the themes tab can say so. */
   readonly themesLeftOut: number;
+  /** PATCH-355. Translate: the language choice and the free-text fallback. */
+  readonly languageChoice: string;
+  readonly onLanguageChoiceChange: (value: string) => void;
+  readonly otherLanguage: string;
+  readonly onOtherLanguageChange: (value: string) => void;
+  readonly targetLanguage: string;
+  readonly languageValid: boolean;
+  /** PATCH-355. One preview row per translated note. */
+  readonly translations: readonly NotesAiTranslationPreview[];
+  readonly failedCount: number;
+  /** PATCH-355. Ticked notes that are synced, so the translate tab can say so. */
+  readonly syncedLeftOut: number;
+  readonly applying: boolean;
+  readonly onApply: (tickedNoteIds: readonly string[]) => void;
 }
 
 export interface UseNotesAiOptions {
@@ -170,6 +162,8 @@ export interface UseNotesAiOptions {
   readonly onMovePosts: (moves: readonly NotesAiPositionMove[]) => Promise<boolean>;
   readonly onDeletePost: (padletId: string) => Promise<void>;
   readonly onReveal: (padletId: string) => void;
+  /** PATCH-355. Apply translated title/content, optimistically, then persisted. */
+  readonly onUpdateNotes: (updates: readonly NotesAiFieldUpdate[]) => Promise<boolean>;
 }
 
 export interface UseNotesAiResult {
@@ -180,16 +174,11 @@ export interface UseNotesAiResult {
 }
 
 const NOTES_AI_UNUSABLE = "The AI's answer couldn't be used — try again.";
-const NOTES_AI_ARRANGE_FAILED = "Couldn't arrange the notes — nothing was changed.";
-const NOTES_AI_ARRANGE_ROLLBACK_INCOMPLETE =
-  "Couldn't arrange the notes, and the rollback was incomplete — some notes or headings may need moving back by hand.";
-const NOTES_AI_UNDO_INCOMPLETE =
-  "Couldn't fully undo the arrangement — some notes or headings may need moving back by hand.";
 
 export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
   const {
     boardId, notes, selectedPadletIds, canEdit, getFreePostPosition, getZIndex, onAddPost,
-    readPostRects, onMovePosts, onDeletePost, onReveal,
+    readPostRects, onMovePosts, onDeletePost, onReveal, onUpdateNotes,
   } = options;
 
   const [isOpen, setIsOpen] = useState(false);
@@ -197,11 +186,40 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
   const [selectedIds, setSelectedIds] = useState<readonly string[]>([]);
   const [action, setActionState] = useState<NotesAiAction>('summary');
   const [generating, setGenerating] = useState(false);
-  const [arranging, setArranging] = useState(false);
   const [result, setResult] = useState<NotesAiResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The ref -> note map stays here; it is never sent.
   const refToNoteId = useRef<Map<string, string>>(new Map());
+  // PATCH-355. Each sent ref's title/content at Generate time, for the stale check.
+  const snapshot = useRef<Map<string, { title: string; content: string }>>(new Map());
+
+  const close = useCallback(() => setIsOpen(false), []);
+
+  const translate = useNotesAiTranslate({
+    candidates,
+    liveNotes: notes,
+    selectedIds,
+    result,
+    refToNoteId: refToNoteId.current,
+    snapshot: snapshot.current,
+    onUpdateNotes,
+    onClose: close,
+  });
+
+  const arrange = useNotesAiArrange({
+    boardId,
+    candidates,
+    selectedIds,
+    result,
+    refToNoteId: refToNoteId.current,
+    readPostRects,
+    getZIndex,
+    onAddPost,
+    onMovePosts,
+    onDeletePost,
+    onReveal,
+    onClose: close,
+  });
 
   const open = useCallback((padletId: string) => {
     if (!canEdit) return;
@@ -223,8 +241,6 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
     setError(null);
     setIsOpen(true);
   }, [canEdit, notes, selectedPadletIds]);
-
-  const close = useCallback(() => setIsOpen(false), []);
 
   const onActionChange = useCallback((next: NotesAiAction) => {
     setActionState(next);
@@ -249,11 +265,27 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
     setGenerating(true);
     setError(null);
     setResult(null);
-    // Only refs, titles and texts leave the browser.
-    const payload = buildNotesAiNotes(ticked);
-    refToNoteId.current = new Map(payload.map((entry, index) => [entry.ref, ticked[index].id]));
     void (async () => {
-      const response = await requestNotesAi({ boardId, action, notes: payload });
+      let response: Awaited<ReturnType<typeof requestNotesAi>>;
+      if (action === 'translate') {
+        // A synced note must be saved through the atomic pair RPC, so it is left out.
+        const sendable = ticked.filter((note) => !isSyncedNote(note));
+        const payload = buildNotesAiTranslation(sendable);
+        refToNoteId.current = new Map(payload.map((entry, index) => [entry.ref, sendable[index].id]));
+        snapshot.current = new Map(payload.map((entry, index) => [
+          entry.ref,
+          { title: sendable[index].title ?? '', content: sendable[index].content ?? '' },
+        ]));
+        response = await requestNotesAi({
+          boardId, action: 'translate', language: translate.targetLanguage, notes: payload,
+        });
+      } else {
+        // Only refs, titles and texts leave the browser.
+        const payload = buildNotesAiNotes(ticked);
+        refToNoteId.current = new Map(payload.map((entry, index) => [entry.ref, ticked[index].id]));
+        snapshot.current = new Map();
+        response = await requestNotesAi({ boardId, action, notes: payload });
+      }
       setGenerating(false);
       if (!response.ok) {
         setError(response.message);
@@ -265,7 +297,7 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
       }
       setResult(response.result);
     })();
-  }, [boardId, generating, candidates, selectedIds, action]);
+  }, [boardId, generating, candidates, selectedIds, action, translate.targetLanguage]);
 
   const onAdd = useCallback((finalResult: NotesAiResult) => {
     if (!boardId) return;
@@ -293,163 +325,6 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
     })();
   }, [boardId, getFreePostPosition, getZIndex, onAddPost]);
 
-  /** PATCH-354. Arrange the reviewed themes: headings first, then the notes. */
-  const onArrange = useCallback((themes: readonly NotesAiThemePreview[]) => {
-    if (!boardId || arranging) return;
-    const ticked = candidates.filter((note) => selectedIds.includes(note.id));
-    // Only FREE notes can be arranged: a note inside a column owns no position.
-    const free = ticked.filter((note) => !isInsideColumn(note));
-    const freeIds = new Set(free.map((note) => note.id));
-    const themeInputs = themes
-      .map((theme) => ({ title: theme.title, noteIds: theme.noteIds.filter((id) => freeIds.has(id)) }))
-      .filter((theme) => theme.noteIds.length > 0);
-    if (themeInputs.length === 0) {
-      toast.info('There are no free notes to arrange.');
-      return;
-    }
-
-    // Layout uses RENDERED sizes; the stored ones are only a fallback.
-    const rendered = readPostRects([...freeIds]);
-    const sizes = new Map<string, { width: number; height: number }>();
-    for (const note of free) {
-      const rect = rendered.get(note.id);
-      sizes.set(note.id, rect
-        ? { width: rect.width, height: rect.height }
-        : { width: note.width, height: note.height });
-    }
-    const placed = [...rendered.values()];
-    const origin = placed.length > 0
-      ? { x: Math.min(...placed.map((rect) => rect.x)), y: Math.min(...placed.map((rect) => rect.y)) }
-      : { x: 0, y: 0 };
-    const obstacles = [...readPostRects().entries()]
-      .filter(([id]) => !freeIds.has(id))
-      .map(([, rect]) => rect);
-
-    const arrangement = arrangeThemes({
-      themes: themeInputs,
-      sizes,
-      origin,
-      headingHeight: SECTION_HEADING_LEVEL_HEIGHT[NOTES_AI_HEADING_LEVEL],
-    });
-    const dx = slideClear(arrangement.bounds, obstacles);
-
-    const noteMoves: NotesAiPositionMove[] = arrangement.notes.map((note) => {
-      const size = sizes.get(note.id) ?? { width: 0, height: 0 };
-      // PATCH-354 Addendum 1: the slide is HORIZONTAL only -- adding dx to y
-      // dropped the notes far below their headings.
-      const clamped = clampRectPositionToFreeformBounds({
-        x: note.x + dx, y: note.y, width: size.width, height: size.height,
-      });
-      return { id: note.id, x: Math.round(clamped.x), y: Math.round(clamped.y) };
-    });
-    const oldMoves: NotesAiPositionMove[] = free.map((note) => ({
-      id: note.id, x: Math.round(note.position_x), y: Math.round(note.position_y),
-    }));
-    const nowIso = new Date().toISOString();
-    const headingRows = arrangement.headings.map((heading) => buildNotesAiHeadingRow(
-      themeInputs[heading.themeIndex].title,
-      {
-        id: crypto.randomUUID(),
-        boardId,
-        positionX: Math.round(heading.x + dx),
-        positionY: Math.round(heading.y),
-        width: Math.round(heading.width),
-        zIndex: getZIndex(),
-        nowIso,
-      },
-    ));
-
-    setArranging(true);
-    void (async () => {
-      const headingIds: string[] = [];
-      // PATCH-354 Addendum 1: never silent (P3). True only when EVERY heading
-      // was actually deleted.
-      const undoHeadings = async (): Promise<boolean> => {
-        let allDeleted = true;
-        for (const id of headingIds) {
-          try {
-            await onDeletePost(id);
-          } catch (error) {
-            allDeleted = false;
-            console.error('Failed to delete a theme heading during undo:', error);
-          }
-        }
-        return allDeleted;
-      };
-      try {
-        for (const row of headingRows) {
-          await onAddPost(row);
-          headingIds.push(row.id);
-        }
-      } catch {
-        const headingsGone = await undoHeadings();
-        setArranging(false);
-        if (headingsGone) {
-          toast.error(NOTES_AI_ARRANGE_FAILED);
-        } else {
-          toast.error(NOTES_AI_ARRANGE_ROLLBACK_INCOMPLETE);
-        }
-        return;
-      }
-
-      const moved = await onMovePosts(noteMoves);
-      if (!moved) {
-        // Undo what was done: never leave a half arrangement -- and say so
-        // loudly when that undo did not fully succeed.
-        const restored = await onMovePosts(oldMoves);
-        const headingsGone = await undoHeadings();
-        setArranging(false);
-        if (restored && headingsGone) {
-          toast.error(NOTES_AI_ARRANGE_FAILED);
-        } else {
-          console.error('Arrangement rollback was incomplete:', { restored, headingsGone });
-          toast.error(NOTES_AI_ARRANGE_ROLLBACK_INCOMPLETE);
-        }
-        return;
-      }
-
-      setArranging(false);
-      setIsOpen(false);
-      onReveal(headingIds[0]);
-      toast.success(`Arranged ${noteMoves.length} notes into ${themeInputs.length} themes`, {
-        duration: 20_000,
-        action: {
-          label: 'Undo',
-          onClick: () => {
-            void (async () => {
-              const restored = await onMovePosts(oldMoves);
-              const headingsGone = await undoHeadings();
-              if (restored && headingsGone) {
-                toast('Arrangement undone');
-              } else {
-                console.error('Arrangement undo was incomplete:', { restored, headingsGone });
-                toast.error(NOTES_AI_UNDO_INCOMPLETE);
-              }
-            })();
-          },
-        },
-      });
-    })();
-  }, [
-    boardId, arranging, candidates, selectedIds, readPostRects,
-    getZIndex, onAddPost, onMovePosts, onDeletePost, onReveal,
-  ]);
-
-  const themesLeftOut = useMemo(
-    () => candidates.filter((note) => selectedIds.includes(note.id) && isInsideColumn(note)).length,
-    [candidates, selectedIds],
-  );
-
-  // The themes result, refs resolved to board ids for the dialog's preview.
-  const themes = useMemo<readonly NotesAiThemePreview[]>(() => {
-    if (!result || !('themes' in result)) return [];
-    const refToId = refToNoteId.current;
-    return result.themes.map((theme) => ({
-      title: theme.title,
-      noteIds: theme.noteRefs.map((ref) => refToId.get(ref)).filter((id): id is string => !!id),
-    }));
-  }, [result]);
-
   const dialogProps = useMemo<NotesAiDialogProps>(() => ({
     isOpen,
     onClose: close,
@@ -464,14 +339,29 @@ export function useNotesAi(options: UseNotesAiOptions): UseNotesAiResult {
     error,
     onGenerate,
     onAdd,
-    themes,
-    onArrange,
-    arranging,
-    themesLeftOut,
+    themes: arrange.themes,
+    onArrange: arrange.onArrange,
+    arranging: arrange.arranging,
+    themesLeftOut: arrange.themesLeftOut,
+    languageChoice: translate.languageChoice,
+    onLanguageChoiceChange: translate.onLanguageChoiceChange,
+    otherLanguage: translate.otherLanguage,
+    onOtherLanguageChange: translate.onOtherLanguageChange,
+    targetLanguage: translate.targetLanguage,
+    languageValid: translate.languageValid,
+    translations: translate.translations,
+    failedCount: translate.failedCount,
+    syncedLeftOut: translate.syncedLeftOut,
+    applying: translate.applying,
+    onApply: translate.onApply,
   }), [
     isOpen, close, candidates, selectedIds, onToggleNote, onToggleAll,
     action, onActionChange, generating, result, error, onGenerate, onAdd,
-    themes, onArrange, arranging, themesLeftOut,
+    arrange.themes, arrange.onArrange, arrange.arranging, arrange.themesLeftOut,
+    translate.languageChoice, translate.onLanguageChoiceChange, translate.otherLanguage,
+    translate.onOtherLanguageChange, translate.targetLanguage, translate.languageValid,
+    translate.translations, translate.failedCount, translate.syncedLeftOut,
+    translate.applying, translate.onApply,
   ]);
 
   return { isOpen, open, close, dialogProps };
