@@ -61,7 +61,8 @@ describe('PATCH-320 Addendum 3: the lightbox can schedule an undated card', () =
     expect(submitted.unscheduled).toBe(false);
     const patch = mapGanttTaskToCardPatch(submitted);
     expect(patch.start_date).toBe('2026-02-01');
-    expect(patch.end_date).toBe('2026-02-03');
+    // PATCH-352: the Gantt's end (3 Feb) is exclusive; the card's is inclusive.
+    expect(patch.end_date).toBe('2026-02-02');
   });
 
   it('unchanged dates keep it unscheduled (a description edit adds no dates)', () => {

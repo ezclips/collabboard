@@ -102,6 +102,58 @@ function durationFromDates(startDate: string, endDate: string): number {
   return Math.max(1, Math.ceil((end.getTime() - start.getTime()) / DAY_MS));
 }
 
+/** Is this a Date at exactly local midnight (00:00:00.000)? */
+function isLocalMidnight(dateLike: string | Date): boolean {
+  const date = typeof dateLike === 'string' ? new Date(dateLike.trim()) : dateLike;
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getHours() === 0
+    && date.getMinutes() === 0
+    && date.getSeconds() === 0
+    && date.getMilliseconds() === 0;
+}
+
+/** Is this a Date at exactly UTC midnight (00:00:00.000Z)? */
+function isUtcMidnight(dateLike: string | Date): boolean {
+  const date = typeof dateLike === 'string' ? new Date(dateLike.trim()) : dateLike;
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getUTCHours() === 0
+    && date.getUTCMinutes() === 0
+    && date.getUTCSeconds() === 0
+    && date.getUTCMilliseconds() === 0;
+}
+
+/**
+ * PATCH-352. A card's `end_date` is its LAST day, INCLUDED.
+ *
+ * A date-only string is that day, unchanged. A timestamp is its LOCAL day --
+ * except a timestamp at exactly local midnight that is NOT UTC midnight, which
+ * is the START of the next day (a Scheduler event ending at midnight, for a
+ * viewer off UTC, covers up to the previous day), so that counts as the day
+ * before.
+ *
+ * Addendum 1: the database stores `date_due` as `timestamptz`, so a date-only
+ * due date comes back as `2026-10-23T00:00:00.000Z`. For a UTC viewer that IS
+ * local midnight, and shifting it back would draw every date-only card a day
+ * short again. A UTC-midnight timestamp is therefore a STORED DATE-ONLY value
+ * and is never shifted. The trade-off, deliberately taken: for a UTC viewer a
+ * Scheduler event ending exactly at midnight is one day longer in the Gantt --
+ * rare, and far better than every date-only card being one day short.
+ */
+function inclusiveEndDay(
+  cardEndDate: string | Date | null | undefined,
+  startDay: string | null,
+): string | null {
+  if (cardEndDate === null || cardEndDate === undefined || cardEndDate === '') return null;
+  if (typeof cardEndDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(cardEndDate.trim())) {
+    return cardEndDate.trim();
+  }
+  const day = toDateOnly(cardEndDate);
+  if (!day) return null;
+  const midnightRollsBack = isLocalMidnight(cardEndDate) && !isUtcMidnight(cardEndDate);
+  if (midnightRollsBack && startDay !== null && day > startDay) return addDays(day, -1);
+  return day;
+}
+
 function normalizeHexColor(value?: string): string | undefined {
   if (!value) return undefined;
   const trimmed = String(value).trim();
@@ -122,8 +174,17 @@ export function ganttProgressToCard(progress?: number): number {
 }
 
 export function mapCardToGanttTask(card: Card): GanttTask {
-  const startDate = toDateOnly(card.start_date) || toDateOnly(card.end_date) || formatLocalDate(new Date());
-  const endDate = toDateOnly(card.end_date) || addDays(startDate, 1);
+  const cardStart = toDateOnly(card.start_date);
+  const inclusiveEnd = inclusiveEndDay(card.end_date, cardStart);
+  const startDate = cardStart || inclusiveEnd || formatLocalDate(new Date());
+  // PATCH-352. DHTMLX's end_date is EXCLUSIVE: a task ends at the START of the
+  // day after its last. A card's end_date is its last day, INCLUDED, so the
+  // Gantt end is one day later -- which also gives a one-day card (start = end)
+  // a real bar instead of a zero-length one. A card with no end keeps its
+  // one-day bar.
+  let endDate = inclusiveEnd ? addDays(inclusiveEnd, 1) : addDays(startDate, 1);
+  // Bad data: an end before the start is drawn as a one-day task at the start.
+  if (endDate <= startDate) endDate = addDays(startDate, 1);
 
   const isMilestoneCard = card.task_type?.toLowerCase() === 'milestone';
 
@@ -165,10 +226,23 @@ export function mapCardToGanttTask(card: Card): GanttTask {
 export function mapGanttTaskToCardPatch(task: Partial<GanttTask>): Partial<Card> {
   const startDate = toDateOnly(task.start_date);
   const isMilestone = task.type === 'milestone' || task.task_type === 'Milestone';
-  // Milestones have zero duration — end_date must equal start_date
-  const endDate = isMilestone
-    ? startDate
-    : (toDateOnly(task.end_date) || (startDate ? addDays(startDate, Math.max(1, task.duration || 1)) : null));
+  const ganttEnd = toDateOnly(task.end_date);
+  let endDate: string | null;
+  if (isMilestone) {
+    // Milestones have zero duration — end_date must equal start_date
+    endDate = startDate;
+  } else if (ganttEnd) {
+    // PATCH-352. The Gantt's end_date is EXCLUSIVE; the card's is the last day,
+    // INCLUDED, so the card end is one day earlier -- never before the start.
+    const inclusive = addDays(ganttEnd, -1);
+    endDate = startDate !== null && inclusive < startDate ? startDate : inclusive;
+  } else if (startDate) {
+    // No Gantt end: `duration` days, inclusive, so a one-day task saves
+    // start = end.
+    endDate = addDays(startDate, Math.max(1, task.duration || 1) - 1);
+  } else {
+    endDate = null;
+  }
   // PATCH-320. An unscheduled task (a card with no dates) must never gain dates
   // from the Gantt — e.g. a rename on such a row writes only the label.
   const isUnscheduled = task.unscheduled === true;

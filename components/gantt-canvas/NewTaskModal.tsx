@@ -4,7 +4,7 @@ import { memo, useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import { useKanbanData, useKanbanPersistence } from '@/components/kanban-canvas/store';
 import type { Card } from '@/types/kanban-canvas';
-import { buildLocalDate, formatLocalDate, getLocalDateParts, getStartOfLocalDay } from './dateUtils';
+import { buildLocalDate, countInclusiveDays, formatLocalDate, getLocalDateParts, getStartOfLocalDay } from './dateUtils';
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -103,8 +103,8 @@ export const NewTaskModal = memo(function NewTaskModal({ isOpen, onClose, parent
     );
     const end = selectedEnd < start ? start : selectedEnd;
 
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    // PATCH-352. Card dates are INCLUSIVE: the same day is "Days 1", not 0.
+    const diffDays = countInclusiveDays(start, end);
     const endDateStr = end.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
 
     return `Days ${diffDays} ${endDateStr}`;

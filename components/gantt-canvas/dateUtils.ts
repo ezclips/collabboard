@@ -31,6 +31,17 @@ export function getStartOfLocalDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+/**
+ * PATCH-352. The number of days a `start`..`end` range covers, INCLUSIVE -- the
+ * way a Kanban card's dates read: the same day is one day, Wed to Fri is three.
+ */
+export function countInclusiveDays(start: Date, end: Date): number {
+  const startDay = getStartOfLocalDay(start);
+  const endDay = getStartOfLocalDay(end);
+  const diffDays = Math.round((endDay.getTime() - startDay.getTime()) / (24 * 60 * 60 * 1000));
+  return Math.max(1, diffDays + 1);
+}
+
 export function getDefaultNewTaskDateRange(now: Date = new Date()): { startDate: Date; endDate: Date } {
   const startDate = getStartOfLocalDay(now);
   const endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 1);

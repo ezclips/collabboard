@@ -67,6 +67,7 @@ describe('gantt date defaults', () => {
     const task = mapCardToGanttTask(card);
 
     expect(task.start_date).toBe('2026-01-31');
-    expect(task.end_date).toBe('2026-12-01');
+    // PATCH-352: the card's end (1 Dec) is inclusive; the Gantt's is exclusive.
+    expect(task.end_date).toBe('2026-12-02');
   });
 });
