@@ -245,7 +245,9 @@ export type AiCreditFeature =
   | 'transcript_punctuate'
   | 'component'
   // PATCH-353. AI on notes: Summary / Action plan.
-  | 'notes_ai';
+  | 'notes_ai'
+  // PATCH-356. Board setup assistant: the AI proposes a starter board.
+  | 'board_setup';
 
 /**
  * PRICING.md §4, basic model. Must be calibrated against measured costs before
@@ -262,6 +264,7 @@ export const AI_CREDIT_COSTS: Readonly<Record<AiCreditFeature, number>> = deepFr
   transcript_punctuate: 1,
   component: 1,
   notes_ai: 1,
+  board_setup: 1,
 });
 
 /** The extra credit a Board AI chat answer costs when board search ran for it. */

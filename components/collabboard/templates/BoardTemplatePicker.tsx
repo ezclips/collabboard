@@ -15,6 +15,7 @@ import {
   writeBoardTemplateRequest,
 } from '@/lib/collabboard/templates/templateRequest';
 import { revealAppliedTemplate } from '@/lib/collabboard/templates/revealAppliedTemplate';
+import { BoardSetupAssistant } from './BoardSetupAssistant';
 
 const EMPTY_SELECTION = 'empty';
 
@@ -71,6 +72,7 @@ export default function BoardTemplatePicker({
   const [applying, setApplying] = useState(false);
   const [failed, setFailed] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
   const [autoTemplate, setAutoTemplate] = useState<string | null>(null);
   const [autoApplying, setAutoApplying] = useState(false);
   const autoAppliedRef = useRef(false);
@@ -107,6 +109,7 @@ export default function BoardTemplatePicker({
     setApplying(false);
     setFailed(false);
     setCollapsed(false);
+    setSetupOpen(false);
     setAutoTemplate(null);
     setAutoApplying(false);
     autoAppliedRef.current = false;
@@ -125,7 +128,7 @@ export default function BoardTemplatePicker({
     selected === EMPTY_SELECTION ? undefined : group?.templates.find((template) => template.id === selected);
 
   const applyTemplate = useCallback(
-    async (template: BoardTemplate) => {
+    async (template: BoardTemplate): Promise<boolean> => {
       setApplying(true);
       setFailed(false);
       const replacePostIds = posts.filter(isPlaceholderPost).map((post) => post.id);
@@ -141,10 +144,11 @@ export default function BoardTemplatePicker({
         dismiss();
         onApplied?.(template);
         if (template.layout === 'freeform') void revealAppliedTemplate();
-      } else {
-        setFailed(true);
-        setApplying(false);
+        return true;
       }
+      setFailed(true);
+      setApplying(false);
+      return false;
     },
     [boardId, sections, posts, dismiss, onApplied],
   );
@@ -252,7 +256,7 @@ export default function BoardTemplatePicker({
 
   return (
     <div ref={panelRef} className="fixed right-4 top-28 z-[1250] flex items-start gap-3" data-board-template-picker="true">
-      {selectedTemplate?.previewUrl && (
+      {!setupOpen && selectedTemplate?.previewUrl && (
         <img
           src={selectedTemplate.previewUrl}
           alt={`${selectedTemplate.name} preview`}
@@ -270,7 +274,9 @@ export default function BoardTemplatePicker({
         }}
       >
         <div className="flex items-center justify-between px-4 pb-2 pt-3">
-          <h2 className="text-sm font-semibold text-gray-900">Choose a template</h2>
+          <h2 className="text-sm font-semibold text-gray-900">
+            {setupOpen ? 'Set up with AI' : 'Choose a template'}
+          </h2>
           <button
             type="button"
             aria-label="Close"
@@ -280,46 +286,66 @@ export default function BoardTemplatePicker({
             ×
           </button>
         </div>
-        <p className="px-4 pb-1 text-xs font-medium uppercase tracking-wide text-gray-400">{group.label}</p>
-        <div className="space-y-1 px-2 pb-2">
-          <button
-            type="button"
-            data-board-template-row="empty"
-            aria-pressed={selected === EMPTY_SELECTION}
-            onClick={() => setSelected(EMPTY_SELECTION)}
-            className={rowClass}
-          >
-            Empty board
-          </button>
-          {group.templates.map((template) => (
-            <button
-              key={template.id}
-              type="button"
-              data-board-template-row={template.id}
-              aria-pressed={selected === template.id}
-              onClick={() => setSelected(template.id)}
-              className={rowClass}
-            >
-              {template.name}
-            </button>
-          ))}
-        </div>
-        {failed && (
-          <p role="alert" className="px-4 pb-2 text-xs text-red-600">
-            The template could not be added. Nothing was changed — try again.
-          </p>
+        {setupOpen ? (
+          <BoardSetupAssistant
+            boardId={boardId}
+            onCreate={applyTemplate}
+            onBack={() => setSetupOpen(false)}
+          />
+        ) : (
+          <>
+            <p className="px-4 pb-1 text-xs font-medium uppercase tracking-wide text-gray-400">{group.label}</p>
+            <div className="space-y-1 px-2 pb-2">
+              {group.layout === 'freeform' && (
+                <button
+                  type="button"
+                  data-board-setup-open="true"
+                  onClick={() => setSetupOpen(true)}
+                  className="block w-full rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-left text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100"
+                >
+                  ✨ Set up with AI
+                </button>
+              )}
+              <button
+                type="button"
+                data-board-template-row="empty"
+                aria-pressed={selected === EMPTY_SELECTION}
+                onClick={() => setSelected(EMPTY_SELECTION)}
+                className={rowClass}
+              >
+                Empty board
+              </button>
+              {group.templates.map((template) => (
+                <button
+                  key={template.id}
+                  type="button"
+                  data-board-template-row={template.id}
+                  aria-pressed={selected === template.id}
+                  onClick={() => setSelected(template.id)}
+                  className={rowClass}
+                >
+                  {template.name}
+                </button>
+              ))}
+            </div>
+            {failed && (
+              <p role="alert" className="px-4 pb-2 text-xs text-red-600">
+                The template could not be added. Nothing was changed — try again.
+              </p>
+            )}
+            <div className="px-4 pb-3">
+              <button
+                type="button"
+                data-board-template-apply="true"
+                disabled={applying}
+                onClick={selected === EMPTY_SELECTION ? dismiss : apply}
+                className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {footerLabel}
+              </button>
+            </div>
+          </>
         )}
-        <div className="px-4 pb-3">
-          <button
-            type="button"
-            data-board-template-apply="true"
-            disabled={applying}
-            onClick={selected === EMPTY_SELECTION ? dismiss : apply}
-            className="w-full rounded-md bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {footerLabel}
-          </button>
-        </div>
       </div>
     </div>
   );

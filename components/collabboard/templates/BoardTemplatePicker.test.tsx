@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const hoisted = vi.hoisted(() => ({
   apply: vi.fn(),
   factory: vi.fn(),
+  requestBoardSetup: vi.fn(),
 }));
 
 vi.mock('@/lib/infra/canvas/postsRepository', () => ({
@@ -17,6 +18,10 @@ vi.mock('@/lib/infra/canvas/postsRepository', () => ({
 
 vi.mock('@/lib/infra/canvas/sectionsRepository', () => ({
   createSectionsRepository: () => ({}),
+}));
+
+vi.mock('@/lib/infra/ai/requestBoardSetup', () => ({
+  requestBoardSetup: hoisted.requestBoardSetup,
 }));
 
 vi.mock('@/lib/domain/canvas/boardTemplates', async (importOriginal) => {
@@ -37,6 +42,7 @@ vi.mock('@/lib/collabboard/templates/revealAppliedTemplate', () => ({
 import BoardTemplatePicker from './BoardTemplatePicker';
 import { readBoardTemplateRequest } from '@/lib/collabboard/templates/templateRequest';
 import { revealAppliedTemplate } from '@/lib/collabboard/templates/revealAppliedTemplate';
+import { boardTemplateSchema } from '@/lib/domain/canvas/boardTemplates';
 
 const BOARD = 'board-1';
 const DISMISS_KEY = `fable.templatePicker.dismissed.${BOARD}`;
@@ -128,6 +134,7 @@ beforeEach(() => {
   window.history.replaceState({}, '', '/');
   hoisted.apply.mockReset();
   hoisted.factory.mockReset();
+  hoisted.requestBoardSetup.mockReset();
   hoisted.apply.mockResolvedValue({ ok: true, value: 1 });
   vi.mocked(revealAppliedTemplate).mockClear();
 });
@@ -719,5 +726,51 @@ describe('BoardTemplatePicker template request state machine (PATCH-301 Addendum
     await mount();
     await settle();
     expect(hoisted.apply).not.toHaveBeenCalled();
+  });
+});
+
+describe('PATCH-356 BoardTemplatePicker: the "Set up with AI" row', () => {
+  const SETUP_RESULT = {
+    title: 'Retro',
+    intro: 'A short retro board.',
+    columns: [{ title: 'Went well', items: [{ type: 'note', title: 'Wins', text: 'What worked?' }] }],
+  };
+
+  it('shows the row on a Freeform board only', async () => {
+    await mount();
+    expect(q('[data-board-setup-open]')).not.toBeNull();
+
+    if (root) { act(() => root!.unmount()); root = null; }
+    host?.remove();
+    document.body.innerHTML = '';
+
+    await mount({ layout: 'wall' });
+    expect(q('[data-board-setup-open]')).toBeNull();
+  });
+
+  it('swaps the list for the assistant and Back returns to it', async () => {
+    await mount();
+    expect(q('[data-board-template-row="empty"]')).not.toBeNull();
+    await click(q('[data-board-setup-open]'));
+    expect(q('[data-board-setup-assistant]')).not.toBeNull();
+    expect(q('[data-board-template-row="empty"]')).toBeNull();
+
+    await click(q('[data-board-setup-back]'));
+    expect(q('[data-board-setup-assistant]')).toBeNull();
+    expect(q('[data-board-template-row="empty"]')).not.toBeNull();
+  });
+
+  it('Create runs the same apply command with a schema-valid template', async () => {
+    hoisted.requestBoardSetup.mockResolvedValue({ ok: true, result: SETUP_RESULT });
+    await mount();
+    await click(q('[data-board-setup-open]'));
+    await click(q('[data-board-setup-preset="retrospective"]'));
+    await click(q('[data-board-setup-generate]'));
+    await click(q('[data-board-setup-create]'));
+
+    expect(hoisted.apply).toHaveBeenCalledTimes(1);
+    const template = hoisted.apply.mock.calls[0][0].template;
+    expect(template).toMatchObject({ id: 'ai-setup', layout: 'freeform' });
+    expect(boardTemplateSchema.safeParse(template).success).toBe(true);
   });
 });

@@ -13,6 +13,7 @@ describe('PATCH-344 aiCreditFeatureLabel', () => {
     expect(aiCreditFeatureLabel('board_chat')).toBe('Board AI chat');
     expect(aiCreditFeatureLabel('notes_to_cards')).toBe('Suggest cards');
     expect(aiCreditFeatureLabel('component')).toBe('AI card');
+    expect(aiCreditFeatureLabel('board_setup')).toBe('Board setup');
   });
 
   it('falls back to "AI feature" for an unknown string', () => {
