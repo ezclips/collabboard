@@ -29,6 +29,7 @@ import {
   UPLOAD_LIMITS,
 } from '@/lib/domain/storage/uploadLimits';
 import type { BoardPlan } from '@/lib/server/billing/boardPlan';
+import { GUEST_UPLOAD_REFUSAL } from '@/lib/domain/auth/guest';
 
 /**
  * PATCH-180. At most this many Knowledge uploads per user per rolling hour.
@@ -103,7 +104,8 @@ export interface KnowledgeTextIngestionWiring {
 }
 
 export interface KnowledgeUploadRouteDependencies {
-  getAuthenticatedUserId(): Promise<string | null>;
+  /** PATCH-358. `isGuest` lets the factory refuse an anonymous user with a 403. */
+  getAuthenticatedUser(): Promise<{ userId: string; isGuest: boolean } | null>;
   createIngestionDeps(): KnowledgeIngestionDeps;
   createTextIngestionDeps(): KnowledgeTextIngestionWiring;
   /**
@@ -170,16 +172,23 @@ export function createKnowledgeUploadPostHandler(deps: KnowledgeUploadRouteDepen
     request: Request,
     context: KnowledgeUploadRouteContext,
   ): Promise<NextResponse> {
-    let userId: string | null;
+    let auth: { userId: string; isGuest: boolean } | null;
     try {
-      userId = await deps.getAuthenticatedUserId();
+      auth = await deps.getAuthenticatedUser();
     } catch {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    if (!userId) {
+    if (!auth) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // PATCH-358. Storage is paid by the board owner, so a guest may not upload.
+    if (auth.isGuest) {
+      return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
+    }
+
+    const userId = auth.userId;
 
     // PATCH-180. Per USER, before the body is read: an over-quota caller cannot
     // make the server buffer a multi-megabyte upload just to be told no.

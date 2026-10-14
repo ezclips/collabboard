@@ -24,6 +24,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { randomUUID } from 'node:crypto';
 import { getAuthenticatedUserId } from '@/lib/imports/auth';
+import { GUEST_UPLOAD_REFUSAL } from '@/lib/domain/auth/guest';
 import { getValidAccessToken } from '@/lib/imports/tokenRefresh';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { generatePreviewPng } from '@/lib/imports/preview';
@@ -84,6 +85,10 @@ async function uploadToStorage(
 export async function POST(req: NextRequest) {
   const auth = await getAuthenticatedUserId(req);
   if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // PATCH-358. Importing writes to the owner's storage, so a guest is refused.
+  if (auth.isGuest) {
+    return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
+  }
   const authResolved = auth;
 
   let body: {

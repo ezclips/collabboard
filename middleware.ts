@@ -1,6 +1,7 @@
 import { createMiddlewareClient } from '@supabase/auth-helpers-nextjs';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { guestRedirectPath } from '@/lib/infra/auth/guestRouteGuard';
 
 export async function middleware(req: NextRequest) {
     const res = NextResponse.next();
@@ -14,6 +15,22 @@ export async function middleware(req: NextRequest) {
     // redirect the user to /
     // Note: we can adjust protected routes logic here as needed, 
     // but the critical part is calling getSession to sync cookies.
+
+    // PATCH-358. Guests stay on their boards: only /dashboard/canvas/<id> and
+    // its sub-paths pass; every other /dashboard page goes to /guest. This
+    // reuses the session read above -- no extra auth call.
+    const guestRedirect = guestRedirectPath(req.nextUrl.pathname, session?.user?.is_anonymous === true);
+    if (guestRedirect) {
+        const url = req.nextUrl.clone();
+        url.pathname = guestRedirect;
+        url.search = '';
+        const redirectResponse = NextResponse.redirect(url);
+        // Keep any cookie the session read just refreshed.
+        for (const cookie of res.cookies.getAll()) {
+            redirectResponse.cookies.set(cookie);
+        }
+        return redirectResponse;
+    }
 
     return res;
 }

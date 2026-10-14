@@ -44,6 +44,7 @@ const BASE: ComponentGenerationInput = {
   temperature: 0.4,
   timeoutMs: 1000,
   canReadBoard: async () => true,
+  isGuest: false,
 };
 
 beforeEach(() => {

@@ -77,6 +77,21 @@ describe('authorisation comes first, and it is EDIT', () => {
     expect((await run(null)).status).toBe(401);
   });
 
+  it('PATCH-358: a guest is refused with 403 guest_no_upload and nothing is uploaded', async () => {
+    const sess = session();
+    const handler = createKnowledgePdfAreaImageEditHandler({
+      getAuthenticatedSession: async () => ({ guest: true } as const),
+    });
+    const response = await handler(request(), context());
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Create a free account to upload files.',
+      code: 'guest_no_upload',
+    });
+    expect(sess.uploadAreaImageVariant).not.toHaveBeenCalled();
+    expect(sess.findPadlet).not.toHaveBeenCalled();
+  });
+
   it('a thrown session lookup is 503, never a write', async () => {
     const handler = createKnowledgePdfAreaImageEditHandler({
       getAuthenticatedSession: async () => { throw new Error('down'); },

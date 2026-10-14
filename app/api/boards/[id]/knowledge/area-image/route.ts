@@ -5,6 +5,7 @@ import {
   createKnowledgePdfAreaImageHandler,
   createRealKnowledgePdfAreaImageSession,
 } from '@/lib/server/knowledge/knowledgePdfAreaImageRoute';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +17,7 @@ export const POST = createKnowledgePdfAreaImageHandler({
     });
     const { data: { user }, error } = await sessionClient.auth.getUser();
     if (error || !user) return null;
+    if (isGuestUser(user)) return { guest: true };
     return createRealKnowledgePdfAreaImageSession(sessionClient, getSupabaseAdmin(), user.id);
   },
 });

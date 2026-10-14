@@ -11,6 +11,7 @@ import {
   SupabaseKnowledgeSourceReferenceWriteAuthorizer,
   type KnowledgeSourceReferenceWriteSupabaseClient,
 } from '../../infra/knowledge/knowledgeSourceReferenceWriteAdapters';
+import { GUEST_UPLOAD_REFUSAL, type GuestAuthMarker } from '../../domain/auth/guest';
 
 /**
  * IMAGE-LIBRARY-DURABLE-PREVIEW-REUSE -- placing a durable PDF-area Library
@@ -93,7 +94,8 @@ export interface KnowledgePdfAreaLibraryReuseSession {
 }
 
 export interface KnowledgePdfAreaLibraryReuseDependencies {
-  getAuthenticatedSession(): Promise<KnowledgePdfAreaLibraryReuseSession | null>;
+  /** PATCH-358. A `GuestAuthMarker` tells the handler to refuse with a 403. */
+  getAuthenticatedSession(): Promise<KnowledgePdfAreaLibraryReuseSession | GuestAuthMarker | null>;
 }
 
 const json = (error: string, status: number) => NextResponse.json({ error }, { status });
@@ -163,6 +165,8 @@ export function createKnowledgePdfAreaLibraryReuseHandler(
     if (!sessionAttempt.ok) return unavailable();
     const session = sessionAttempt.value;
     if (!session) return unauthorized();
+    // PATCH-358. A guest may not place a Library image (it uploads a private crop).
+    if ('guest' in session) return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
 
     const { id: boardId, libraryItemId } = await context.params;
     if (typeof boardId !== 'string' || !UUID.test(boardId)) return badRequest();

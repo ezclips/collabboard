@@ -36,6 +36,17 @@ import {
 } from '../ai/resolveAIModelForRole';
 import { resolveBoardPlan, type BoardPlan } from './boardPlan';
 
+/**
+ * PATCH-358. A guest (an anonymous Supabase user) may not spend AI credits:
+ * `Create a free account to use AI.` is refused by every credit check before it
+ * reads the preference, the plan or the ledger.
+ */
+export const GUEST_AI_REFUSAL = {
+  kind: 'refused' as const,
+  status: 403 as const,
+  body: { error: 'Create a free account to use AI.', code: 'guest_no_ai' },
+};
+
 export type CheckManagedAiCreditsResult =
   | {
     readonly kind: 'allowed';
@@ -46,7 +57,7 @@ export type CheckManagedAiCreditsResult =
   }
   | {
     readonly kind: 'refused';
-    readonly status: 402;
+    readonly status: 402 | 403;
     readonly body: { readonly error: string; readonly code: string };
   };
 
@@ -130,8 +141,10 @@ export async function checkManagedAiCredits(
   boardId: string,
   now: Date,
   cost: number,
+  isGuest: boolean,
   options?: { readonly boardChat?: boolean },
 ): Promise<CheckManagedAiCreditsResult> {
+  if (isGuest) return GUEST_AI_REFUSAL;
   const plan = await resolveBoardPlan(admin, boardId);
   return evaluateManagedAiCredits(admin, plan, now, cost, options);
 }
@@ -238,7 +251,7 @@ export type ManagedAiCreditDecision =
   }
   | {
     readonly kind: 'refused';
-    readonly status: 402;
+    readonly status: 402 | 403;
     readonly body: { readonly error: string; readonly code: string };
   };
 
@@ -293,7 +306,9 @@ export async function checkBoardAiCredits(input: {
   readonly now: Date;
   readonly boardChat?: boolean;
   readonly preferences: AIRolePreferenceReader;
+  readonly isGuest: boolean;
 }): Promise<ManagedAiCreditDecision> {
+  if (input.isGuest) return GUEST_AI_REFUSAL;
   const source = await resolveAIModelSourceForRole(
     input.userId as never,
     input.role,
@@ -335,7 +350,7 @@ export type AiActionCreditDecision =
   | { readonly kind: 'byok' }
   | { readonly kind: 'forbidden' }
   | { readonly kind: 'allowed'; readonly plan: BoardPlan; readonly balance: AiCreditBalance; readonly charge: boolean }
-  | { readonly kind: 'refused'; readonly status: 402; readonly body: { readonly error: string; readonly code: string } };
+  | { readonly kind: 'refused'; readonly status: 402 | 403; readonly body: { readonly error: string; readonly code: string } };
 
 export async function checkAiActionCredits(input: {
   readonly boardId?: string | null;
@@ -345,7 +360,9 @@ export async function checkAiActionCredits(input: {
   readonly now: Date;
   readonly preferences: AIRolePreferenceReader;
   readonly canReadBoard: (boardId: string) => Promise<boolean>;
+  readonly isGuest: boolean;
 }): Promise<AiActionCreditDecision> {
+  if (input.isGuest) return GUEST_AI_REFUSAL;
   const source = await resolveAIModelSourceForRole(
     input.userId as never,
     input.role,

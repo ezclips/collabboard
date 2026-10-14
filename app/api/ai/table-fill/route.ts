@@ -26,6 +26,7 @@ import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /** PATCH-188. The optional board id, validated the same way a zod uuid is. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -167,6 +168,7 @@ export async function POST(req: NextRequest) {
         role: AI_ROLE_EDIT,
         cost: AI_CREDIT_COSTS.table_fill,
         now: new Date(),
+        isGuest: isGuestUser(user),
         preferences: createAIRolePreferenceRepository(),
         canReadBoard: (id) => canReadBoardKnowledge(
           supabase as unknown as KnowledgeBoardReadAuthorizationClient,

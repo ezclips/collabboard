@@ -43,6 +43,7 @@ import {
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 import type { BoardAiJsonValue } from '@/lib/domain/ai/boardAiChat';
 import {
   resolveBoardAiChatContext,
@@ -273,6 +274,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         role: AI_ROLE_CHAT,
         cost: AI_CREDIT_COSTS.board_chat,
         now: new Date(),
+        isGuest: isGuestUser(user),
         // Basic Q&A on boards keeps answering at 0 credits on a paid plan.
         boardChat: true,
         preferences: createAIRolePreferenceRepository(),

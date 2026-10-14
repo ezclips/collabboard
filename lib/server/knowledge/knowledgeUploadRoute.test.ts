@@ -65,7 +65,7 @@ function handlerFor(
   const text = textDeps();
   const resolvePlanForBoard = vi.fn(async () => ({ plan, documentCount }));
   const post = createKnowledgeUploadPostHandler({
-    getAuthenticatedUserId: async () => userId,
+    getAuthenticatedUser: async () => ({ userId, isGuest: false }),
     createIngestionDeps: () => state.deps,
     createTextIngestionDeps: () => text.wiring,
     resolvePlanForBoard,
@@ -172,7 +172,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
   it('rejects unauthenticated requests before constructing ingestion dependencies', async () => {
     const createIngestionDeps = vi.fn(() => ingestionDeps().deps);
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => null,
+      getAuthenticatedUser: async () => null,
       createIngestionDeps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -184,10 +184,29 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
     expect(createIngestionDeps).not.toHaveBeenCalled();
   });
 
+  it('PATCH-358: refuses a guest with 403 guest_no_upload, before any storage work', async () => {
+    const createIngestionDeps = vi.fn(() => ingestionDeps().deps);
+    const post = createKnowledgeUploadPostHandler({
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: true }),
+      createIngestionDeps,
+      createTextIngestionDeps: () => textDeps().wiring,
+      ...planDep(),
+    });
+
+    const response = await post(postRequest(pdfFile()), context());
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Create a free account to upload files.',
+      code: 'guest_no_upload',
+    });
+    expect(createIngestionDeps).not.toHaveBeenCalled();
+  });
+
   it('rejects a missing file', async () => {
     const state = ingestionDeps();
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -207,7 +226,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
     // is refused there, as before.
     const state = ingestionDeps();
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -223,7 +242,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
   it('rejects a fake .pdf without the %PDF- signature', async () => {
     const state = ingestionDeps();
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -241,7 +260,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
   it('rejects a user who cannot mutate the board', async () => {
     const state = ingestionDeps(false);
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -257,7 +276,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
   it('delegates an authorized PDF to Knowledge ingestion and returns minimal uploaded metadata', async () => {
     const state = ingestionDeps();
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => state.deps,
       createTextIngestionDeps: () => textDeps().wiring,
       ...planDep(),
@@ -289,7 +308,7 @@ describe('P6A Knowledge PDF upload HTTP boundary', () => {
 describe('Stage 1 text sources reach the text path, and only they do', () => {
   function handler(text = textDeps(), pdf = ingestionDeps()) {
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => pdf.deps,
       createTextIngestionDeps: () => text.wiring,
       ...planDep(),
@@ -572,7 +591,7 @@ describe("PATCH-185: the board owner's plan decides size and document limits", (
   it('a plan-resolution failure is 503 and formData() is never called', async () => {
     const { request, formData } = requestBeforeBody();
     const post = createKnowledgeUploadPostHandler({
-      getAuthenticatedUserId: async () => USER_ID,
+      getAuthenticatedUser: async () => ({ userId: USER_ID, isGuest: false }),
       createIngestionDeps: () => ingestionDeps().deps,
       createTextIngestionDeps: () => textDeps().wiring,
       resolvePlanForBoard: async () => {

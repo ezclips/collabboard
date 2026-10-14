@@ -1,8 +1,9 @@
-import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import SharePageClient from './SharePageClient';
+import GuestJoinCard from './GuestJoinCard';
 import { createShareLinkRepository } from '@/lib/infra/share/shareLinkRepository';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export default async function SharePage({
     params,
@@ -48,8 +49,10 @@ export default async function SharePage({
     const permission: string = data.permission || 'view';
     const isPasswordProtected: boolean = !!data.password_hash;
 
-    // PATCH-357. A board link needs a signed-in visitor: redeeming applies the
-    // link's permission to that account. A standalone post link does not.
+    // PATCH-357/358. A board link needs a signed-in visitor: redeeming applies
+    // the link's permission to that account. A standalone post link does not.
+    // An unsigned visitor is offered to JOIN AS A GUEST instead of being sent to
+    // the login page.
     const isBoardLink = shareTarget === 'board' || shareTarget === 'post-in-board';
     let isSignedIn = false;
     if (isBoardLink) {
@@ -61,9 +64,28 @@ export default async function SharePage({
         } catch {
             isSignedIn = false;
         }
-        if (!isSignedIn) {
-            redirect(`/auth?redirect=${encodeURIComponent(`/share/${token}`)}`);
+    }
+
+    if (isBoardLink && !isSignedIn) {
+        let boardTitle: string | null = null;
+        // PATCH-357/358. A password-protected link must not reveal its target:
+        // the title is withheld until the password has proven itself, exactly
+        // like the board id and padlet id below.
+        if (!isPasswordProtected && boardId) {
+            try {
+                const admin = getSupabaseAdmin();
+                const { data: board } = await admin
+                    .from('boards')
+                    .select('title')
+                    .eq('id', boardId)
+                    .maybeSingle();
+                const title = (board as { title?: unknown } | null)?.title;
+                boardTitle = typeof title === 'string' ? title : null;
+            } catch {
+                boardTitle = null;
+            }
         }
+        return <GuestJoinCard token={token} boardTitle={boardTitle} />;
     }
 
     // A password-protected link discloses only that it is protected. The target

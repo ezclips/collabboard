@@ -23,7 +23,7 @@ export function makeAuthedClient(token: string) {
 
 export async function getAuthenticatedUserId(
   req: NextRequest
-): Promise<{ userId: string; token: string } | null> {
+): Promise<{ userId: string; token: string; isGuest: boolean } | null> {
   const token = getBearerToken(req);
   if (!token) return null;
 
@@ -31,5 +31,6 @@ export async function getAuthenticatedUserId(
   const { data, error } = await supabase.auth.getUser(token);
   if (error || !data.user?.id) return null;
 
-  return { userId: data.user.id, token };
+  // PATCH-358. An anonymous Supabase user is a guest; the caller refuses uploads.
+  return { userId: data.user.id, token, isGuest: data.user.is_anonymous === true };
 }

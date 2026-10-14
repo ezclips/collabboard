@@ -19,6 +19,7 @@ import { createKnowledgeUploadPostHandler } from '@/lib/server/knowledge/knowled
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 export const runtime = 'nodejs';
 
@@ -58,7 +59,7 @@ export const GET = createKnowledgeListGetHandler({
 });
 
 export const POST = createKnowledgeUploadPostHandler({
-  async getAuthenticatedUserId() {
+  async getAuthenticatedUser() {
     const cookieStore = await cookies();
     const sessionClient = createKnowledgeRouteClient(cookieStore);
     const {
@@ -67,7 +68,7 @@ export const POST = createKnowledgeUploadPostHandler({
     } = await sessionClient.auth.getUser();
 
     if (error || !user) return null;
-    return user.id;
+    return { userId: user.id, isGuest: isGuestUser(user) };
   },
 
   createIngestionDeps() {

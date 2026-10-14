@@ -133,7 +133,7 @@ describe('checkManagedAiCredits', () => {
       allowance: { data: [{ credits: 20 }], error: null },
     });
 
-    const result = await checkManagedAiCredits(client, BOARD, NOW, 1);
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, false);
 
     expect(result.kind).toBe('allowed');
     if (result.kind !== 'allowed') return;
@@ -148,7 +148,7 @@ describe('checkManagedAiCredits', () => {
       grant: { data: [{ credits: 30 }], error: null },
     });
 
-    const result = await checkManagedAiCredits(client, BOARD, NOW, 1);
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, false);
 
     expect(result).toEqual({
       kind: 'refused',
@@ -165,7 +165,7 @@ describe('checkManagedAiCredits', () => {
       subscription: { data: { plan: 'pro', status: 'active', current_period_start: '2026-09-01T00:00:00Z', current_period_end: '2026-10-01T00:00:00Z' }, error: null },
       allowance: { data: [{ credits: 500 }], error: null },
     });
-    const proResult = await checkManagedAiCredits(pro.client, BOARD, NOW, 1, { boardChat: true });
+    const proResult = await checkManagedAiCredits(pro.client, BOARD, NOW, 1, false, { boardChat: true });
     expect(proResult.kind).toBe('allowed');
     if (proResult.kind === 'allowed') expect(proResult.charge).toBe(false);
 
@@ -174,7 +174,7 @@ describe('checkManagedAiCredits', () => {
       allowance: { data: [{ credits: 10 }], error: null },
       grant: { data: [{ credits: 30 }], error: null },
     });
-    const freeResult = await checkManagedAiCredits(free.client, BOARD, NOW, 1, { boardChat: true });
+    const freeResult = await checkManagedAiCredits(free.client, BOARD, NOW, 1, false, { boardChat: true });
     expect(freeResult.kind).toBe('refused');
     if (freeResult.kind === 'refused') expect(freeResult.body.code).toBe('plan_limit_credits');
   });
@@ -184,7 +184,7 @@ describe('checkManagedAiCredits', () => {
       board: { data: { workspace_id: null }, error: null },
     });
 
-    const result = await checkManagedAiCredits(client, BOARD, NOW, 1);
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, false);
 
     expect(result).toEqual({
       kind: 'refused',
@@ -202,7 +202,7 @@ describe('checkManagedAiCredits', () => {
       allowance: { data: null, error: { code: '57014', message: 'timeout' } },
     });
 
-    await expect(checkManagedAiCredits(client, BOARD, NOW, 1)).rejects.toEqual({
+    await expect(checkManagedAiCredits(client, BOARD, NOW, 1, false)).rejects.toEqual({
       code: '57014',
       message: 'timeout',
     });
@@ -287,6 +287,7 @@ describe('checkBoardAiCredits', () => {
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'),
     });
 
@@ -304,6 +305,7 @@ describe('checkBoardAiCredits', () => {
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'),
     });
 
@@ -319,6 +321,7 @@ describe('checkBoardAiCredits', () => {
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'),
     });
 
@@ -333,6 +336,7 @@ describe('checkBoardAiCredits', () => {
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'),
     });
 
@@ -349,6 +353,7 @@ describe('checkBoardAiCredits', () => {
 
     const decision = await checkBoardAiCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences(null),
     });
 
@@ -370,6 +375,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: undefined, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'), canReadBoard: read,
     });
 
@@ -390,6 +396,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'), canReadBoard: canReadBoard(false),
     });
 
@@ -405,6 +412,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'), canReadBoard: canReadBoard(true),
     });
 
@@ -420,6 +428,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences('conn-1'), canReadBoard: canReadBoard(true),
     });
 
@@ -449,6 +458,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: undefined, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences(null), canReadBoard: read,
     });
 
@@ -469,6 +479,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences(null), canReadBoard: canReadBoard(false),
     });
 
@@ -485,6 +496,7 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     const decision = await checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences(null), canReadBoard: canReadBoard(true),
     });
 
@@ -498,9 +510,60 @@ describe('checkAiActionCredits (PATCH-188)', () => {
 
     await expect(checkAiActionCredits({
       boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: false,
       preferences: preferences(null),
       canReadBoard: async () => { throw new Error('down'); },
     })).rejects.toThrow('down');
+  });
+});
+
+describe('PATCH-358 guests cannot spend AI credits', () => {
+  const guestRefusal = {
+    kind: 'refused',
+    status: 403,
+    body: { error: 'Create a free account to use AI.', code: 'guest_no_ai' },
+  };
+  const preferences = () => ({
+    getPreference: vi.fn(async () => ({ ok: true, value: { connectionId: null, modelId: null } }) as never),
+  });
+
+  it('checkAiActionCredits refuses a guest and reads nothing at all', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const prefs = preferences();
+    const read = vi.fn(async () => true);
+
+    const decision = await checkAiActionCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: true, preferences: prefs, canReadBoard: read,
+    });
+
+    expect(decision).toEqual(guestRefusal);
+    expect(prefs.getPreference).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('checkBoardAiCredits refuses a guest before the preference reader', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const prefs = preferences();
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: true, preferences: prefs,
+    });
+
+    expect(decision).toEqual(guestRefusal);
+    expect(prefs.getPreference).not.toHaveBeenCalled();
+    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('checkManagedAiCredits refuses a guest before the plan or the ledger', async () => {
+    const { client, aiFilters } = makeAdmin();
+
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, true);
+
+    expect(result).toEqual(guestRefusal);
+    expect(aiFilters).toEqual([]);
   });
 });
 
@@ -523,7 +586,7 @@ describe('PATCH-189 — the trial and the small Free plan', () => {
       workspace: TRIAL_WORKSPACE,
       allowance: { data: [{ credits: 99 }], error: null },
     });
-    const allowed = await checkManagedAiCredits(under.client, BOARD, NOW, 1);
+    const allowed = await checkManagedAiCredits(under.client, BOARD, NOW, 1, false);
     expect(allowed.kind).toBe('allowed');
     if (allowed.kind === 'allowed') {
       expect(allowed.balance.allowance).toBe(100);
@@ -535,7 +598,7 @@ describe('PATCH-189 — the trial and the small Free plan', () => {
       workspace: TRIAL_WORKSPACE,
       allowance: { data: [{ credits: 100 }], error: null },
     });
-    const refused = await checkManagedAiCredits(spent.client, BOARD, NOW, 1);
+    const refused = await checkManagedAiCredits(spent.client, BOARD, NOW, 1, false);
     expect(refused.kind).toBe('refused');
     if (refused.kind === 'refused') expect(refused.body.code).toBe('plan_limit_credits');
   });
@@ -546,7 +609,7 @@ describe('PATCH-189 — the trial and the small Free plan', () => {
       workspace: EXPIRED_WORKSPACE,
     });
 
-    const result = await checkManagedAiCredits(client, BOARD, NOW, 1);
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, false);
 
     expect(result.kind).toBe('refused');
     if (result.kind === 'refused') expect(result.body.code).toBe('plan_limit_credits');
@@ -558,7 +621,7 @@ describe('PATCH-189 — the trial and the small Free plan', () => {
       workspace: EXPIRED_WORKSPACE,
     });
 
-    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, { boardChat: true });
+    const result = await checkManagedAiCredits(client, BOARD, NOW, 1, false, { boardChat: true });
 
     expect(result.kind).toBe('refused');
     if (result.kind === 'refused') expect(result.body.code).toBe('plan_limit_credits');

@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 type UploadAuthDependencies = {
-  getAuthenticatedUserId(): Promise<string | null>;
+  getAuthenticatedUser(): Promise<{ userId: string; isGuest: boolean } | null>;
 };
 
 type ReadAuthDependencies = {
@@ -21,9 +21,9 @@ vi.mock('next/headers', () => ({ cookies: mocks.cookies }));
 vi.mock('@supabase/auth-helpers-nextjs', () => ({ createRouteHandlerClient: mocks.createRouteHandlerClient }));
 vi.mock('@/lib/server/knowledge/knowledgeUploadRoute', () => ({
   createKnowledgeUploadPostHandler: (deps: UploadAuthDependencies) => async () => {
-    const userId = await deps.getAuthenticatedUserId();
-    return userId
-      ? Response.json({ userId })
+    const auth = await deps.getAuthenticatedUser();
+    return auth
+      ? Response.json({ userId: auth.userId })
       : Response.json({ error: 'Unauthorized' }, { status: 401 });
   },
 }));
@@ -351,5 +351,19 @@ describe('P6C.3 Next 15 resolved-cookie compatibility is intact', () => {
     expect(source).not.toContain('cookies: async () => cookieStore');
     expect(source).toContain('const cookieStore = await cookies()');
     expect(source).toContain('createKnowledgeRouteClient(cookieStore)');
+  });
+});
+
+// PATCH-358. The render-pages route is a plain inline handler with no factory
+// seam to unit-test, and app/** is not in vitest's include globs, so its guard
+// is pinned as a source invariant here.
+describe('PATCH-358 guest upload guard: the render-pages route', () => {
+  it('refuses a guest before the render RPC', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'app/api/boards/[id]/knowledge/[documentId]/render-pages/route.ts'),
+      'utf8',
+    );
+    expect(source).toContain('isGuestUser(user)');
+    expect(source).toContain('GUEST_UPLOAD_REFUSAL');
   });
 });

@@ -15,6 +15,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * PATCH-233. "Show options": one AI call extracts the STRUCTURE of the prompt
@@ -216,6 +217,7 @@ export async function POST(req: NextRequest) {
     try {
       const generation = await generateComponentText({
         userId: user.id as UserId,
+        isGuest: isGuestUser(user),
         system: JSON_ONLY_SYSTEM,
         user: finalPrompt,
         maxTokens: COMPONENT_MAX_TOKENS,

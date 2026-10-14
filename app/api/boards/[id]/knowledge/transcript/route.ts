@@ -12,6 +12,7 @@ import {
 } from '@/lib/infra/knowledge/knowledgeTranscriptAdapters';
 import { createKnowledgeTranscriptPostHandler } from '@/lib/server/knowledge/knowledgeTranscriptRoute';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 export const runtime = 'nodejs';
 
@@ -26,7 +27,7 @@ function createTranscriptRouteClient(cookieStore: ResolvedNextCookieStore) {
 }
 
 export const POST = createKnowledgeTranscriptPostHandler({
-  async getAuthenticatedUserId() {
+  async getAuthenticatedUser() {
     const cookieStore = await cookies();
     const sessionClient = createTranscriptRouteClient(cookieStore);
     const {
@@ -35,7 +36,7 @@ export const POST = createKnowledgeTranscriptPostHandler({
     } = await sessionClient.auth.getUser();
 
     if (error || !user) return null;
-    return user.id;
+    return { userId: user.id, isGuest: isGuestUser(user) };
   },
 
   createTranscriptDeps() {

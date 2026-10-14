@@ -12,6 +12,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 import { DrawnParseError, parseDrawnPicture, type DrawnParseResult } from '@/lib/ai/drawn/format';
 import { preferredAttempt } from '@/lib/ai/drawn/attemptRanking';
@@ -155,8 +156,9 @@ export async function POST(req: NextRequest) {
     let first: RepairResult;
     try {
       const generation = await generateComponentText({
-        userId: user.id as UserId,
-        system: drawPrompt.system,
+          userId: user.id as UserId,
+          isGuest: isGuestUser(user),
+          system: drawPrompt.system,
         user: drawPrompt.user,
         maxTokens: DRAWN_MAX_TOKENS,
         temperature: DRAWN_TEMPERATURE,
@@ -216,6 +218,7 @@ export async function POST(req: NextRequest) {
         attempts += 1;
         const audit = await generateComponentText({
           userId: user.id as UserId,
+          isGuest: isGuestUser(user),
           system: DRAW_SYSTEM_PROMPT,
           user: buildAuditUser(first, outline),
           maxTokens: DRAWN_MAX_TOKENS,

@@ -11,6 +11,7 @@ import { UPLOAD_LIMITS } from '../../domain/storage/uploadLimits';
 import { KNOWLEDGE_STORAGE_BUCKET } from '../../infra/knowledge/knowledgeIngestionAdapters';
 import { SupabaseKnowledgeSourceReferenceWriteAuthorizer, type KnowledgeSourceReferenceWriteSupabaseClient }
   from '../../infra/knowledge/knowledgeSourceReferenceWriteAdapters';
+import { GUEST_UPLOAD_REFUSAL, type GuestAuthMarker } from '../../domain/auth/guest';
 
 /**
  * PATCH-182 -- write an EDITED area picture (a Draw-on-top composite or a crop)
@@ -81,7 +82,8 @@ export interface KnowledgePdfAreaImageEditSession {
 }
 
 export interface KnowledgePdfAreaImageEditDependencies {
-  getAuthenticatedSession(): Promise<KnowledgePdfAreaImageEditSession | null>;
+  /** PATCH-358. A `GuestAuthMarker` tells the handler to refuse with a 403. */
+  getAuthenticatedSession(): Promise<KnowledgePdfAreaImageEditSession | GuestAuthMarker | null>;
 }
 
 const json = (error: string, status: number) => NextResponse.json({ error }, { status });
@@ -112,6 +114,8 @@ export function createKnowledgePdfAreaImageEditHandler(
     if (!sessionAttempt.ok) return unavailable();
     const session = sessionAttempt.value;
     if (!session) return unauthorized();
+    // PATCH-358. A guest may not write an edited crop into the owner's storage.
+    if ('guest' in session) return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
 
     // Per USER, before the body is read: an over-quota caller cannot make the
     // server buffer an image just to be told no.

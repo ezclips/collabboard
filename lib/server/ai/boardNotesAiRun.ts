@@ -27,6 +27,7 @@ import type { AiCreditFeature } from '@/lib/domain/billing/plans';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /** The bounded duration one notes-AI model call gets. */
 export const BOARD_NOTES_AI_TIMEOUT_MS = 25_000;
@@ -123,6 +124,7 @@ export async function runBoardNotesAi<TBody>(
         role: AI_ROLE_EDIT,
         cost: input.cost,
         now: new Date(),
+        isGuest: isGuestUser(user),
         preferences: createAIRolePreferenceRepository(),
         canReadBoard: (id) => canReadBoardKnowledge(
           supabase as unknown as KnowledgeBoardReadAuthorizationClient,

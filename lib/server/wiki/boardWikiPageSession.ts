@@ -22,6 +22,7 @@ import { createBoardAiSearchReader } from '../../infra/ai/boardAiSearchReader';
 import { createAIRolePreferenceRepository } from '../../infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '../../infra/settings/aiProviderCredentialRepository';
 import { canReadBoardKnowledge } from '../knowledge/knowledgeBoardReadAuthorization';
+import { isGuestUser } from '../../domain/auth/guest';
 import type { BoardWikiSession } from './boardWikiPageRoute';
 
 /**
@@ -390,7 +391,7 @@ export async function getBoardWikiSession(): Promise<BoardWikiSession | null> {
             credentials: createAIProviderCredentialRepository(),
           },
         },
-        { boardId, pageId, userId, topic },
+        { boardId, pageId, userId, topic, isGuest: isGuestUser(user) },
       );
     },
 

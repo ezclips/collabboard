@@ -24,6 +24,7 @@ import { SupabaseKnowledgeSourceReferenceValidationRepository, SupabaseKnowledge
 import { KNOWLEDGE_STORAGE_BUCKET } from '../../infra/knowledge/knowledgeIngestionAdapters';
 import { cropDerivativeToWebp, type KnowledgeSourceRegionCropDownload }
   from './knowledgeSourceRegionCropRoute';
+import { GUEST_UPLOAD_REFUSAL, type GuestAuthMarker } from '../../domain/auth/guest';
 
 /**
  * R6B -- turn a rectangle a reader drew on a private Knowledge PDF page into
@@ -82,7 +83,8 @@ export interface KnowledgePdfAreaImageSession {
 }
 
 export interface KnowledgePdfAreaImageRouteDependencies {
-  getAuthenticatedSession(): Promise<KnowledgePdfAreaImageSession | null>;
+  /** PATCH-358. A `GuestAuthMarker` tells the handler to refuse with a 403. */
+  getAuthenticatedSession(): Promise<KnowledgePdfAreaImageSession | GuestAuthMarker | null>;
 }
 
 const json = (error: string, status: number) => NextResponse.json({ error }, { status });
@@ -192,6 +194,8 @@ export function createKnowledgePdfAreaImageHandler(
     if (!sessionAttempt.ok) return unavailable();
     const session = sessionAttempt.value;
     if (!session) return unauthorized();
+    // PATCH-358. A guest may not create a card (it uploads a private crop).
+    if ('guest' in session) return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
 
     const { id: boardId } = await context.params;
 

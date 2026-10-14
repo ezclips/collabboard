@@ -9,6 +9,7 @@ import {
   createKnowledgePdfAreaImageEditHandler,
   createRealKnowledgePdfAreaImageEditSession,
 } from '@/lib/server/knowledge/knowledgePdfAreaImageEditRoute';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 export const runtime = 'nodejs';
 
@@ -32,6 +33,9 @@ export const PUT = createKnowledgePdfAreaImageEditHandler({
     });
     const { data: { user }, error } = await sessionClient.auth.getUser();
     if (error || !user) return null;
+    // PATCH-358. The edit path uploads a crop into the owner's storage, so a
+    // guest is refused. The GET serve path above is a read and is not guarded.
+    if (isGuestUser(user)) return { guest: true };
     return createRealKnowledgePdfAreaImageEditSession(sessionClient, getSupabaseAdmin(), user.id);
   },
 });

@@ -87,6 +87,21 @@ describe('U1-U5: every authority is re-established here', () => {
     expect((await run(null)).status).toBe(401);
   });
 
+  it('PATCH-358: a guest is refused with 403 guest_no_upload and never writes', async () => {
+    const sess = session();
+    const handler = createKnowledgePdfAreaLibraryReuseHandler({
+      getAuthenticatedSession: async () => ({ guest: true } as const),
+    });
+    const response = await handler(request(), context());
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Create a free account to upload files.',
+      code: 'guest_no_upload',
+    });
+    expect(sess.findOwnLibraryItem).not.toHaveBeenCalled();
+    expect(sess.insertReusePlacement).not.toHaveBeenCalled();
+  });
+
   it('U2 (R10): a viewer/non-editor is 403 before any Library row is read', async () => {
     const sess = session({ canWriteBoard: vi.fn(async () => false) });
     expect((await run(sess)).status).toBe(403);

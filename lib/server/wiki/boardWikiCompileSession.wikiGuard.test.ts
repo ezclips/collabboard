@@ -134,7 +134,7 @@ describe('PATCH-196 a compile never records a wiki-page source', () => {
           recordBoardAiCreditUsage: async () => {},
         },
       },
-      { boardId: BOARD, pageId: PAGE, userId: USER, topic: 'oil plan' },
+      { boardId: BOARD, pageId: PAGE, userId: USER, topic: 'oil plan', isGuest: false },
     );
 
     expect(result.ok).toBe(true);

@@ -26,6 +26,7 @@ interface Recorded {
 
 function makeHandler(options: {
   userId?: string | null;
+  isGuest?: boolean;
   authorized?: boolean;
   target?: KnowledgeTranscriptTarget | null;
   nextRevision?: string;
@@ -74,7 +75,11 @@ function makeHandler(options: {
   };
 
   const handler = createKnowledgeTranscriptPostHandler({
-    getAuthenticatedUserId: () => Promise.resolve(options.userId === undefined ? 'user-1' : options.userId),
+    getAuthenticatedUser: () => Promise.resolve(
+      options.userId === null
+        ? null
+        : { userId: options.userId ?? 'user-1', isGuest: options.isGuest ?? false },
+    ),
     createTranscriptDeps: () => deps,
     recordCleanupCandidate: (entry) => recorded.cleanup.push(entry),
   });
@@ -103,6 +108,17 @@ describe('the transcript import route', () => {
     const { handler } = makeHandler({ userId: null });
     const response = await handler(request(validBody()), context);
     expect(response.status).toBe(401);
+  });
+
+  it('PATCH-358: refuses a guest with 403 guest_no_upload, before any storage work', async () => {
+    const { handler, recorded } = makeHandler({ isGuest: true });
+    const response = await handler(request(validBody()), context);
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'Create a free account to upload files.',
+      code: 'guest_no_upload',
+    });
+    expect(recorded.creates).toHaveLength(0);
   });
 
   it('refuses a caller without board permission', async () => {

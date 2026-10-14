@@ -82,6 +82,11 @@ export interface ComponentGenerationInput {
    */
   readonly creditFeature?: AiCreditFeature;
   readonly creditCost?: number;
+  /**
+   * PATCH-358. A guest may not spend AI credits. REQUIRED, so a new component
+   * route cannot forget it: the check refuses a guest before it reads anything.
+   */
+  readonly isGuest: boolean;
 }
 
 export interface ComponentGenerationResult {
@@ -122,6 +127,7 @@ export async function generateComponentText(
     role: AI_ROLE_COMPONENT,
     cost: input.creditCost ?? 1,
     now: new Date(),
+    isGuest: input.isGuest,
     preferences,
     canReadBoard: input.canReadBoard,
   });

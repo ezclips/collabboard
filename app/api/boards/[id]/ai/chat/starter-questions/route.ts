@@ -21,6 +21,7 @@ import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiPro
 import { AI_ROLE_CHAT } from '@/lib/ai/aiRoles';
 import { allowByokFor, checkBoardAiCredits } from '@/lib/server/billing/aiCredits';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * STARTER QUESTIONS for one document.
@@ -169,6 +170,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         role: AI_ROLE_CHAT,
         cost: 0,
         now: new Date(),
+        isGuest: isGuestUser(user),
         boardChat: true,
         preferences: createAIRolePreferenceRepository(),
       });

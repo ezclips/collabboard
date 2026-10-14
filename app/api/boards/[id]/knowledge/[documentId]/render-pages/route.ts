@@ -5,6 +5,7 @@ import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { GUEST_UPLOAD_REFUSAL, isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * PDF-R1 -- ask for a document's page visuals to be (re)rendered.
@@ -63,6 +64,10 @@ async function authorize(
   const { data: { user }, error: authError } = await sessionClient.auth.getUser();
   if (authError || !user) {
     return { ok: false, response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) };
+  }
+  // PATCH-358. A guest may not request page renders (a worker writes them).
+  if (isGuestUser(user)) {
+    return { ok: false, response: NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 }) };
   }
   let allowed: boolean;
   try {

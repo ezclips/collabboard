@@ -24,6 +24,7 @@ import { transcriptPunctuateCredits } from '@/lib/domain/billing/plans';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * MAKE A TRANSCRIPT READABLE, in BATCHES.
@@ -193,6 +194,7 @@ export async function POST(req: NextRequest) {
         role: AI_ROLE_SOURCE,
         cost: creditCost,
         now: new Date(),
+        isGuest: isGuestUser(user),
         preferences: createAIRolePreferenceRepository(),
         canReadBoard: (id) => canReadBoardKnowledge(
           supabase as unknown as KnowledgeBoardReadAuthorizationClient,

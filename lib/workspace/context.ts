@@ -1,5 +1,7 @@
 import type { SupabaseClient, User } from '@supabase/supabase-js';
 
+import { isGuestUser } from '@/lib/domain/auth/guest';
+
 export type WorkspaceRole = 'owner' | 'admin' | 'member' | 'readonly';
 export type InvitableWorkspaceRole = Exclude<WorkspaceRole, 'owner'>;
 
@@ -112,9 +114,13 @@ async function ensureWorkspaceBootstrap(
 
 export async function resolveCurrentWorkspace(
   supabase: SupabaseClient,
-  user: Pick<User, 'id' | 'email'>,
+  user: Pick<User, 'id' | 'email' | 'is_anonymous'>,
   adminClient?: SupabaseClient,
 ): Promise<WorkspaceContext | null> {
+  // PATCH-358. A guest never gets a workspace: no bootstrap, no membership
+  // insert, no query at all. Returning here is what keeps an anonymous user
+  // from minting an owned workspace the moment they open a board.
+  if (isGuestUser(user)) return null;
   try {
     const { data: initialMembershipRows, error: membershipError } = await supabase
       .from('workspace_members')

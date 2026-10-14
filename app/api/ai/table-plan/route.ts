@@ -27,6 +27,7 @@ import { AI_CREDIT_COSTS } from '@/lib/domain/billing/plans';
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * EDIT A TABLE WITH AI: a command becomes a PLAN the client checks and previews.
@@ -142,6 +143,7 @@ export async function POST(req: NextRequest) {
         role: AI_ROLE_EDIT,
         cost: AI_CREDIT_COSTS.table_plan,
         now: new Date(),
+        isGuest: isGuestUser(user),
         preferences: createAIRolePreferenceRepository(),
         canReadBoard: (id) => canReadBoardKnowledge(
           supabase as unknown as KnowledgeBoardReadAuthorizationClient,

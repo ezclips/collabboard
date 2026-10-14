@@ -190,6 +190,8 @@ export async function compileBoardWikiProposal(
     readonly pageId: string;
     readonly userId: string;
     readonly topic: string;
+    /** PATCH-358. A guest may not spend AI credits; the check refuses them. */
+    readonly isGuest: boolean;
   },
 ): Promise<Result<BoardWikiProposal, DomainError>> {
   // The page, for the baseline a diff is shown against. Board-scoped like every
@@ -294,6 +296,7 @@ export async function compileBoardWikiProposal(
       role: AI_ROLE_CHAT,
       cost: AI_CREDIT_COSTS.wiki_compile,
       now: new Date(),
+      isGuest: input.isGuest,
       preferences: deps.resolverDeps.preferences,
     });
   } catch {

@@ -10,6 +10,7 @@ import { generateComponentText, ComponentCreditRefusal } from '@/lib/server/ai/c
 import { canReadBoardKnowledge } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { KnowledgeBoardReadAuthorizationClient } from '@/lib/server/knowledge/knowledgeBoardReadAuthorization';
 import type { UserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /** PATCH-188. The optional board id, validated the same way a zod uuid is. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -220,6 +221,7 @@ export async function POST(req: NextRequest) {
     try {
       const generation = await generateComponentText({
         userId: user.id as UserId,
+        isGuest: isGuestUser(user),
         system: JSON_ONLY_SYSTEM,
         user: `${CLASSIFY_SYSTEM_PROMPT}\n\nUser prompt:\n${prompt.trim()}`,
         maxTokens: CLASSIFY_MAX_TOKENS,

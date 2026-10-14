@@ -19,13 +19,15 @@ import {
   type KnowledgeTranscriptImportDeps,
 } from '@/lib/domain/knowledge/knowledgeTranscriptImport';
 import type { KnowledgeTranscriptFormat } from '@/lib/domain/knowledge/knowledgeTranscriptCues';
+import { GUEST_UPLOAD_REFUSAL } from '@/lib/domain/auth/guest';
 
 export interface KnowledgeTranscriptRouteContext {
   readonly params: Promise<{ id: string }>;
 }
 
 export interface KnowledgeTranscriptRouteDependencies {
-  getAuthenticatedUserId(): Promise<string | null>;
+  /** PATCH-358. `isGuest` lets the factory refuse an anonymous user with a 403. */
+  getAuthenticatedUser(): Promise<{ userId: string; isGuest: boolean } | null>;
   createTranscriptDeps(): KnowledgeTranscriptImportDeps;
   /** Somewhere to send cleanup candidates. See the note at its call site. */
   recordCleanupCandidate?(entry: {
@@ -111,13 +113,16 @@ export function createKnowledgeTranscriptPostHandler(deps: KnowledgeTranscriptRo
     request: Request,
     context: KnowledgeTranscriptRouteContext,
   ): Promise<NextResponse> {
-    let userId: string | null;
+    let auth: { userId: string; isGuest: boolean } | null;
     try {
-      userId = await deps.getAuthenticatedUserId();
+      auth = await deps.getAuthenticatedUser();
     } catch {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
-    if (!userId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!auth) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // PATCH-358. Storage is paid by the board owner, so a guest may not upload.
+    if (auth.isGuest) return NextResponse.json(GUEST_UPLOAD_REFUSAL, { status: 403 });
+    const userId = auth.userId;
 
     const { id: boardId } = await context.params;
 

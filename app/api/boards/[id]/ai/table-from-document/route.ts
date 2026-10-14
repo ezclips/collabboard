@@ -27,6 +27,7 @@ import { aiProviderErrorStatus } from '@/lib/server/settings/aiProviderErrorStat
 import { createAIRolePreferenceRepository } from '@/lib/infra/settings/aiRolePreferenceRepository';
 import { createAIProviderCredentialRepository } from '@/lib/infra/settings/aiProviderCredentialRepository';
 import { asUserId } from '@/lib/domain/core/ids';
+import { isGuestUser } from '@/lib/domain/auth/guest';
 
 /**
  * BUILD A TABLE FROM ONE BOARD DOCUMENT.
@@ -149,6 +150,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         role: AI_ROLE_SOURCE,
         cost: AI_CREDIT_COSTS.table_from_document,
         now: new Date(),
+        isGuest: isGuestUser(user),
         preferences: createAIRolePreferenceRepository(),
       });
     } catch {

@@ -80,6 +80,20 @@ const GOOGLE_IMAGE = {
 };
 
 describe('resolve-selection: the body cannot choose what is fetched', () => {
+  it('PATCH-358: a guest is refused with 403 guest_no_upload and uploads nothing', async () => {
+    h.auth.mockResolvedValue({ userId: 'user-1', token: 'supabase-token', isGuest: true });
+
+    const res = await POST(makeRequest({ provider: 'google-drive', itemId: GOOGLE_IMAGE.id }));
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toEqual({
+      error: 'Create a free account to upload files.',
+      code: 'guest_no_upload',
+    });
+    expect(h.resolveGoogle).not.toHaveBeenCalled();
+    expect(h.uploads).toHaveLength(0);
+  });
+
   it('never fetches the body thumbnail URL; fetches the resolver raw thumbnail', async () => {
     h.resolveGoogle.mockResolvedValue(GOOGLE_IMAGE);
 
