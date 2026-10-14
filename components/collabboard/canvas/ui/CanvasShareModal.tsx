@@ -3,9 +3,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { canManageWorkspace, workspaceRoleDescriptions, type InvitableWorkspaceRole, type WorkspaceRole } from '@/lib/workspace/context';
 import { supabaseBrowser } from '@/lib/supabase/browser';
-import { Check, ChevronDown, Copy, Link2, Loader2, Mail, Users, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Link2, Loader2, Mail, QrCode, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import CanvasPeopleTab from './CanvasPeopleTab';
+import CanvasGuestLinksTab from './CanvasGuestLinksTab';
 
 interface CanvasShareModalProps {
   isOpen: boolean;
@@ -15,7 +16,7 @@ interface CanvasShareModalProps {
   currentWorkspaceRole: WorkspaceRole | null;
 }
 
-type ShareTab = 'email' | 'link' | 'people';
+type ShareTab = 'email' | 'link' | 'guests' | 'people';
 
 function generateInvitationPassword() {
   return Math.random().toString(36).substring(2, 10);
@@ -240,7 +241,7 @@ export default function CanvasShareModal({
               }`}
             >
               <Mail className="h-4 w-4" />
-              Email invite
+              Email
             </button>
             <button
               type="button"
@@ -251,6 +252,17 @@ export default function CanvasShareModal({
             >
               <Link2 className="h-4 w-4" />
               Invite link
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('guests')}
+              data-share-tab="guests"
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-sm font-medium transition ${
+                activeTab === 'guests' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <QrCode className="h-4 w-4" />
+              Guest link
             </button>
             <button
               type="button"
@@ -407,6 +419,8 @@ export default function CanvasShareModal({
                 </div>
               )}
             </div>
+          ) : activeTab === 'guests' ? (
+            <CanvasGuestLinksTab canvasId={canvasId} canvasTitle={canvasTitle} />
           ) : (
             <CanvasPeopleTab canvasId={canvasId} />
           )}
@@ -418,7 +432,7 @@ export default function CanvasShareModal({
             onClick={onClose}
             className="rounded-lg px-4 py-2 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-50"
           >
-            {activeTab === 'link' && generatedLink ? 'Done' : 'Cancel'}
+            {activeTab === 'link' && generatedLink ? 'Done' : activeTab === 'guests' ? 'Close' : 'Cancel'}
           </button>
           {activeTab === 'email' ? (
             <button

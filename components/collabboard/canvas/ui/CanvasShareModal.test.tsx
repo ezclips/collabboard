@@ -41,6 +41,11 @@ const buttonWithText = (text: string) =>
   (Array.from(host.querySelectorAll('button')) as HTMLElement[])
     .find((button) => (button.textContent ?? '').includes(text)) ?? null;
 
+/** A button whose trimmed label is exactly `text` (the footer's primary action). */
+const exactButton = (text: string) =>
+  (Array.from(host.querySelectorAll('button')) as HTMLElement[])
+    .find((button) => (button.textContent ?? '').trim() === text) ?? null;
+
 const click = async (element: HTMLElement | null) => {
   await act(async () => { element!.click(); });
   await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -76,5 +81,31 @@ describe('PATCH-362 CanvasShareModal: the People tab', () => {
     await mount();
     await click(buttonWithText('People'));
     expect(buttonWithText('Create')).toBeNull();
+  });
+});
+
+describe('PATCH-365 CanvasShareModal: the Guest link tab', () => {
+  it('renders all four tab buttons, including Guest link', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));
+    await mount();
+    const tabs = Array.from(host.querySelectorAll('button')).map((button) => button.textContent ?? '');
+    expect(tabs.some((label) => label.includes('Email'))).toBe(true);
+    expect(tabs.some((label) => label.includes('Invite link'))).toBe(true);
+    expect(tabs.some((label) => label.includes('Guest link'))).toBe(true);
+    expect(tabs.some((label) => label.includes('People'))).toBe(true);
+  });
+
+  it('switches to the Guest link tab and renders it', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => jsonResponse({ links: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await mount();
+    await click(host.querySelector('[data-share-tab="guests"]') as HTMLElement);
+
+    expect(host.querySelector('[data-guest-links]')).not.toBeNull();
+    expect(host.querySelector('[data-guest-link-create="true"]')).not.toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/boards/board-1/share-links'))).toBe(true);
+    // The footer's primary action is not a Create link on this tab.
+    expect(exactButton('Create')).toBeNull();
   });
 });

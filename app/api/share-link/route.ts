@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import { getBoardPermission, boardPermissionSatisfies, mapLegacyToBoardPermission } from '@/lib/auth/permissions';
 import { hashSharePassword } from '@/lib/server/share/sharePassword';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { boardShareTargetRequiresAdmin } from '@/lib/domain/sharing/guestLinks';
 
 // PATCH-357. Share links are a service-role table (they carry a password hash),
 // so the server operations use the admin client. There is deliberately NO
@@ -57,15 +58,19 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid share target' }, { status: 400 });
         }
 
-        // Verify the caller has at least the permission level they are granting
+        // Verify the caller has at least the permission level they are granting.
+        // PATCH-365: a board-target link must be created by an ADMIN, whatever
+        // level it grants.
         const requiredPerm = mapLegacyToBoardPermission(permission) ?? 'reader';
+        const needsAdmin = boardShareTargetRequiresAdmin(shareTarget);
+        const neededPerm = needsAdmin ? 'admin' : requiredPerm;
+        const refusal = needsAdmin
+            ? { error: 'Only the board owner can create guest links.' }
+            : { error: 'Insufficient board permissions to create this share link' };
         if (boardId) {
             const callerPerm = await getBoardPermission(supabase, boardId, user.id);
-            if (!boardPermissionSatisfies(callerPerm, requiredPerm)) {
-                return NextResponse.json(
-                    { error: 'Insufficient board permissions to create this share link' },
-                    { status: 403 },
-                );
+            if (!boardPermissionSatisfies(callerPerm, neededPerm)) {
+                return NextResponse.json(refusal, { status: 403 });
             }
         } else if (padletId) {
             // For padlet-only shares, look up the padlet's board and check permission there
@@ -78,11 +83,8 @@ export async function POST(request: NextRequest) {
                 return NextResponse.json({ error: 'Post not found' }, { status: 404 });
             }
             const callerPerm = await getBoardPermission(supabase, padlet.board_id, user.id);
-            if (!boardPermissionSatisfies(callerPerm, requiredPerm)) {
-                return NextResponse.json(
-                    { error: 'Insufficient board permissions to create this share link' },
-                    { status: 403 },
-                );
+            if (!boardPermissionSatisfies(callerPerm, neededPerm)) {
+                return NextResponse.json(refusal, { status: 403 });
             }
         }
 
