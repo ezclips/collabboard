@@ -113,6 +113,9 @@ function installSupabase(
   return {
     resolvePadletsCall: (index: number, reply: ReadReply<unknown>) => padletsCalls[index].resolve(reply),
     getStatusHandler: (boardId: string) => channels.get(`canvas-${boardId}`)?.status ?? null,
+    // PATCH-367. The realtime handler the channel registered, so a test can
+    // deliver a padlets payload by hand.
+    getRealtimeHandler: (boardId: string) => channels.get(`canvas-${boardId}`)?.realtime ?? null,
   };
 }
 
@@ -430,5 +433,72 @@ describe('K. the layout-phase lifecycle boundary invalidates synchronously', () 
     window.removeEventListener('unhandledrejection', onRejection);
     expect(seenRejections, 'no unhandled rejection from the post-unmount continuation').toEqual([]);
     expect(consoleErrorSpy.mock.calls.some(([msg]) => String(msg).includes('fetchData failed')), 'no error path taken either').toBe(false);
+  });
+});
+
+// == L. PATCH-367: an UPDATE for an unknown id ADDS the post (an approval) ==
+
+describe('L. PATCH-367 the realtime UPDATE-for-an-unknown-id branch', () => {
+  it('an UPDATE for a post we already hold is merged in place', async () => {
+    const calls: PadletsCall[] = [];
+    const { getRealtimeHandler } = installSupabase([], calls, { instantPadlets: { [A]: okReply([row(A, 'p1')]) } });
+    await mount(A);
+    const realtime = getRealtimeHandler(A)!;
+    expect(probe().padletIds).toEqual([`${A}-p1`]);
+
+    await act(async () => {
+      realtime({ eventType: 'UPDATE', new: { ...row(A, 'p1'), title: 'Edited' }, old: row(A, 'p1') });
+      await flush();
+    });
+    expect(probe().padletIds, 'no duplicate is created').toEqual([`${A}-p1`]);
+  });
+
+  it('an UPDATE for an id we do not hold is ADDED (a post just became visible)', async () => {
+    const calls: PadletsCall[] = [];
+    const { getRealtimeHandler } = installSupabase([], calls, { instantPadlets: { [A]: okReply([row(A, 'p1')]) } });
+    await mount(A);
+    const realtime = getRealtimeHandler(A)!;
+
+    await act(async () => {
+      realtime({ eventType: 'UPDATE', new: row(A, 'approved'), old: row(A, 'approved') });
+      await flush();
+    });
+    expect(probe().padletIds).toEqual([`${A}-p1`, `${A}-approved`]);
+  });
+
+  it('a DELETE still removes the post', async () => {
+    const calls: PadletsCall[] = [];
+    const { getRealtimeHandler } = installSupabase([], calls, { instantPadlets: { [A]: okReply([row(A, 'p1')]) } });
+    await mount(A);
+    const realtime = getRealtimeHandler(A)!;
+
+    await act(async () => {
+      realtime({ eventType: 'DELETE', new: null, old: row(A, 'p1') });
+      await flush();
+    });
+    expect(probe().padletIds).toEqual([]);
+  });
+
+  // PATCH-367 Addendum 1. The owner's approval is confirmed by the server's own
+  // echo: an UPDATE for a post we ALREADY hold, with the key gone, must be
+  // applied (this is what clears "Waiting for approval").
+  it('a later UPDATE without pendingApproval is applied (the approval echo)', async () => {
+    const calls: PadletsCall[] = [];
+    const { getRealtimeHandler } = installSupabase([], calls, {
+      instantPadlets: { [A]: okReply([{ ...row(A, 'p1'), metadata: { pendingApproval: true } }]) },
+    });
+    await mount(A);
+    const realtime = getRealtimeHandler(A)!;
+    expect((api!.padlets[0].metadata as { pendingApproval?: unknown }).pendingApproval).toBe(true);
+
+    await act(async () => {
+      realtime({
+        eventType: 'UPDATE',
+        new: { ...row(A, 'p1'), metadata: {} },
+        old: { ...row(A, 'p1'), metadata: { pendingApproval: true } },
+      });
+      await flush();
+    });
+    expect((api!.padlets[0].metadata as { pendingApproval?: unknown }).pendingApproval).toBeUndefined();
   });
 });

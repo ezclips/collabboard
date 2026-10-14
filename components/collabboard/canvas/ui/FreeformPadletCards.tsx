@@ -15,6 +15,7 @@ import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplay
 import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import { guestPostStripColor } from '@/lib/domain/presence/boardPresence';
+import { PENDING_LABEL, approvedMetadata, isPendingApproval } from '@/lib/domain/canvas/postApproval';
 import { formatSummary, summarizeColumn } from '@/lib/domain/canvas/tableNumbers';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -339,6 +340,17 @@ export interface FreeformPadletCardsProps {
   onUnlinkKanban?: (padletId: string) => void;
   // PATCH-353. "AI on notes…" on a note's context menu (editors only).
   onAiOnNotes?: (padletId: string) => void;
+  // PATCH-367. The board OWNER only: shows Approve/Decline on a guest post that
+  // is waiting for approval. Passed down from CanvasClient's `isBoardOwner(...)`
+  // (the same value other per-board flags travel by prop).
+  canApproveGuestPosts?: boolean;
+  /**
+   * PATCH-367 Addendum 1. CanvasClient's immediate, un-debounced approval write.
+   * It must NOT go through the debounced metadata saver: that saver marks the
+   * post locally modified, which would make the realtime layer skip the server's
+   * own approval echo and leave the card showing "Waiting for approval".
+   */
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -612,6 +624,8 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     commentModeMutations,
     onKnowledgeSourceClipDropOnNote, onResetImageCrop,
     kanbanLinkStatus, onSendToKanban, onOpenKanbanCard, onUnlinkKanban, onAiOnNotes,
+    canApproveGuestPosts = false,
+    onApproveGuestPost,
   } = props;
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
@@ -1134,6 +1148,26 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     updatePadletContent,
     commitPadletMeta,
   } = stableActions;
+
+  // PATCH-367. Which pending post's Decline is asking for an inline confirm.
+  const [declineConfirmId, setDeclineConfirmId] = React.useState<string | null>(null);
+
+  /**
+   * PATCH-367 Addendum 1. Approve a waiting guest post: hand the metadata
+   * WITHOUT the `pendingApproval` key to CanvasClient's IMMEDIATE write. It is
+   * deliberately NOT the debounced saver, so the server's own approval echo is
+   * applied rather than skipped (see the `onApproveGuestPost` prop's comment).
+   */
+  const approvePendingPost = React.useCallback((padlet: Padlet) => {
+    const nextMetadata = approvedMetadata(padlet.metadata as Record<string, unknown> | null | undefined);
+    onApproveGuestPost?.(padlet.id, nextMetadata);
+  }, [onApproveGuestPost]);
+
+  /** PATCH-367. Decline a waiting guest post: the EXISTING delete path. */
+  const declinePendingPost = React.useCallback((padlet: Padlet) => {
+    setDeclineConfirmId(null);
+    void deletePadletById(padlet.id);
+  }, [deletePadletById]);
 
   // "Full view" -- per-post toggle for a frameless, title-less display,
   // right-click menu only (Image/Card-Clipart/Drawing/AI Component). Stored
@@ -3765,6 +3799,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             </button>
           </div>
         ) : null;
+        // PATCH-367. A guest post the database is holding for approval: dashed
+        // outline, a label, and (owner only) Approve / Decline.
+        const pendingApproval = isPendingApproval(padlet.metadata);
         const content = (
           <div
             ref={(el) => { genericCardRefs.current[padlet.id] = el; }}
@@ -3790,6 +3827,10 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 : '80px',
               border: isFullView ? 'none' : '1px solid #e5e7eb',
               backgroundColor: isFullView ? 'transparent' : (padlet.metadata?.cardColor || '#ffffff'),
+              // PATCH-367. An outline, not a border, so a pending post keeps its
+              // exact size and layout.
+              outline: pendingApproval ? '2px dashed #f59e0b' : undefined,
+              outlineOffset: pendingApproval ? '-2px' : undefined,
             }}
           >
             {/* Drop-target indicator: shown over a container while another
@@ -4063,6 +4104,70 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                 </div>
               );
             })()}
+
+            {/* PATCH-367. A guest post waiting for approval: the label, and for
+                the board owner the Approve / Decline controls. */}
+            {pendingApproval ? (
+              <div
+                data-pending-approval="true"
+                data-no-drag="true"
+                onPointerDown={(e) => e.stopPropagation()}
+                className="relative z-30 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800"
+              >
+                <span>{PENDING_LABEL}</span>
+                {canApproveGuestPosts ? (
+                  <span className="ml-auto flex items-center gap-1">
+                    {declineConfirmId === padlet.id ? (
+                      <>
+                        <span className="text-amber-700">Decline?</span>
+                        <button
+                          type="button"
+                          data-decline-post-confirm="true"
+                          data-no-drag="true"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); declinePendingPost(padlet); }}
+                          className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          data-no-drag="true"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setDeclineConfirmId(null); }}
+                          className="rounded px-2 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          data-approve-post="true"
+                          data-no-drag="true"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); approvePendingPost(padlet); }}
+                          className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          type="button"
+                          data-decline-post="true"
+                          data-no-drag="true"
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => { e.stopPropagation(); setDeclineConfirmId(padlet.id); }}
+                          className="rounded px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50"
+                        >
+                          Decline
+                        </button>
+                      </>
+                    )}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
 
             {/* Save to Library button (visible on hover) */}
             {/* REMOVED: Save to Library button for freeform canvas posts

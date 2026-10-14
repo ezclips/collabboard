@@ -284,9 +284,18 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
         return [...prev, newRecord as Padlet];
       });
     } else if (eventType === 'UPDATE' && newRecord) {
-      setPadlets(prev => prev.map(p =>
-        p.id === newRecord.id ? { ...p, ...newRecord } : p
-      ));
+      setPadlets(prev => {
+        if (prev.some(p => p.id === newRecord.id)) {
+          return prev.map(p =>
+            p.id === newRecord.id ? { ...p, ...newRecord } : p
+          );
+        }
+        // PATCH-367. An UPDATE for a post we do NOT hold is a post that just
+        // became VISIBLE to this viewer -- an approval (the restrictive SELECT
+        // policy now admits it). Add it. A post deleted locally was marked
+        // above, so that skip caught it and this branch is never reached.
+        return [...prev, newRecord as Padlet];
+      });
     } else if (eventType === 'DELETE' && oldRecord) {
       setPadlets(prev => prev.filter(p => p.id !== oldRecord.id));
     }

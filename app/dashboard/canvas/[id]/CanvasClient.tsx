@@ -127,6 +127,8 @@ import { useBoardPresence } from '@/components/collabboard/presence/useBoardPres
 import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceStack';
 import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
 import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
+import PendingPostsPill from '@/components/collabboard/canvas/ui/PendingPostsPill';
+import { isPendingApproval, pendingCount } from '@/lib/domain/canvas/postApproval';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -693,6 +695,31 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     (padletId: string, fullMetadata: any) => padletMetaSaver.schedule(padletId, fullMetadata),
     [padletMetaSaver],
   );
+
+  /**
+   * PATCH-367 Addendum 1. Approve a guest post IMMEDIATELY and WITHOUT marking
+   * it locally modified. The debounced saver marks the post when the save
+   * starts, which makes the realtime layer SKIP the server's own approval echo
+   * -- the authoritative final state -- whenever an earlier guest edit lands
+   * first. Writing straight through (and cancelling any pending debounce for
+   * this post) lets that echo apply.
+   */
+  const approveGuestPostNow = useCallback(async (padletId: string, approvedMeta: Record<string, unknown>) => {
+    const previous = padlets.find((p) => p.id === padletId)?.metadata;
+    padletMetaSaver.cancel(padletId);
+    setPadlets((prev) => prev.map((p) => (p.id === padletId ? { ...p, metadata: approvedMeta } : p)));
+    try {
+      const updatePostMetadata = createUpdatePostMetadataCommand(createPostsRepository());
+      const result = await updatePostMetadata({ postId: padletId, metadata: approvedMeta }, { userId: null });
+      if (!result.ok) {
+        setPadlets((prev) => prev.map((p) => (p.id === padletId ? { ...p, metadata: previous } : p)));
+        showSaveFailureToast();
+      }
+    } catch {
+      setPadlets((prev) => prev.map((p) => (p.id === padletId ? { ...p, metadata: previous } : p)));
+      showSaveFailureToast();
+    }
+  }, [padlets, padletMetaSaver, showSaveFailureToast]);
 
   const flushPendingPadletMeta = useCallback(() => padletMetaSaver.flush(), [padletMetaSaver]);
 
@@ -5203,6 +5230,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   // Direct delete by ID (for context menu)
   const deletePadletById = async (id: string) => {
     debugCanvasLogger('saveStart', { op: 'deletePadletById', id });
+    // PATCH-367. Mark the local delete so a realtime UPDATE for this id (an
+    // approval racing the delete) cannot resurrect the post.
+    markPadletLocallyModified(id);
     try {
       const deletePost = createDeletePostCommand(createPostsRepository());
       const result = await deletePost({ postId: id }, { userId: null });
@@ -5248,6 +5278,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       return;
     }
 
+    // PATCH-367. Mark the local delete so a realtime UPDATE for this id cannot
+    // resurrect the post (see deletePadletById).
+    markPadletLocallyModified(padletId);
     try {
       // Optimistic update - remove from UI immediately
       setPadlets(prev => prev.filter(p => p.id !== padletId));
@@ -11184,6 +11217,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     onOpenKanbanCard={openKanbanCard}
                     onUnlinkKanban={unlinkKanban}
                     onAiOnNotes={canEditBoardContent ? notesAi.open : undefined}
+                    canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                    onApproveGuestPost={approveGuestPostNow}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -11216,6 +11251,20 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               isOwnerOrAdmin={canUnfreezeBoard}
               onUnfreeze={() => boardFreeze.setFrozen(false)}
             />
+
+            {/* PATCH-367. Owner-only pill: guest posts waiting for approval.
+                Clicking it reveals the oldest waiting post (Freeform reveal). */}
+            {isBoardOwner(user?.id, canvasId, canvas) ? (
+              <PendingPostsPill
+                count={pendingCount(padlets)}
+                onFocus={() => {
+                  const oldest = padlets.find((p) => isPendingApproval(p.metadata));
+                  if (!oldest) return;
+                  boardRevealRequestIdRef.current += 1;
+                  setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: oldest.id });
+                }}
+              />
+            ) : null}
 
             {isFreeformLayout && (
               <div

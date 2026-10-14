@@ -21,6 +21,7 @@ import {
   type GuestLinkPermission,
 } from '@/lib/domain/sharing/guestLinks';
 import GuestLinkQrOverlay from './GuestLinkQrOverlay';
+import GuestApprovalToggle from './GuestApprovalToggle';
 
 export interface CanvasGuestLinksTabProps {
   readonly canvasId: string;
@@ -177,6 +178,9 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
 
   return (
     <div data-guest-links="true" className="space-y-4">
+      {/* PATCH-367. Self-sufficient: shows only to the board owner. */}
+      <GuestApprovalToggle boardId={canvasId} />
+
       {error ? (
         <p data-guest-link-error="true" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
