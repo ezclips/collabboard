@@ -1,4 +1,6 @@
 import { redirect } from 'next/navigation';
+import { cookies } from 'next/headers';
+import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
 import SharePageClient from './SharePageClient';
 import { createShareLinkRepository } from '@/lib/infra/share/shareLinkRepository';
 
@@ -46,22 +48,24 @@ export default async function SharePage({
     const permission: string = data.permission || 'view';
     const isPasswordProtected: boolean = !!data.password_hash;
 
-    // Option 2: Full board — redirect immediately (no password shown before redirect)
-    if (shareTarget === 'board' && boardId && !isPasswordProtected) {
-        redirect(`/dashboard/canvas/${boardId}`);
+    // PATCH-357. A board link needs a signed-in visitor: redeeming applies the
+    // link's permission to that account. A standalone post link does not.
+    const isBoardLink = shareTarget === 'board' || shareTarget === 'post-in-board';
+    let isSignedIn = false;
+    if (isBoardLink) {
+        try {
+            const cookieStore = await cookies();
+            const supabase = createServerComponentClient({ cookies: () => cookieStore as any });
+            const { data: { user } } = await supabase.auth.getUser();
+            isSignedIn = !!user;
+        } catch {
+            isSignedIn = false;
+        }
+        if (!isSignedIn) {
+            redirect(`/auth?redirect=${encodeURIComponent(`/share/${token}`)}`);
+        }
     }
 
-    // Option 3: Post in board — redirect with openPadlet param
-    if (shareTarget === 'post-in-board' && boardId && !isPasswordProtected) {
-        const url = padletId
-            ? `/dashboard/canvas/${boardId}?openPadlet=${padletId}`
-            : `/dashboard/canvas/${boardId}`;
-        redirect(url);
-    }
-
-    // For password-protected board/post-in-board links, or option 1 (post only):
-    // render the client component which handles password check + content display
-    //
     // A password-protected link discloses only that it is protected. The target
     // ids and the granted permission arrive from verify-password once the
     // password has proven itself, so they never sit in this payload for a
@@ -76,6 +80,7 @@ export default async function SharePage({
             padletId={withholdsTarget ? null : padletId}
             permission={withholdsTarget ? '' : permission}
             isPasswordProtected={isPasswordProtected}
+            isSignedIn={isSignedIn}
         />
     );
 }

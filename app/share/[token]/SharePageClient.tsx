@@ -13,6 +13,8 @@ interface SharePageClientProps {
     padletId: string | null;
     permission: string;
     isPasswordProtected: boolean;
+    /** PATCH-357. A board link needs a signed-in visitor to grant access to. */
+    isSignedIn: boolean;
 }
 
 interface PadletData {
@@ -24,6 +26,16 @@ interface PadletData {
     metadata?: Record<string, any>;
 }
 
+/** The redeem failure, in the same voice as the page's own not-found/expired copy. */
+function redeemErrorMessage(status: number, serverError?: unknown): string {
+    if (status === 404) return 'This share link is invalid or has been removed.';
+    if (status === 410) return 'This share link has expired and is no longer valid.';
+    if (status === 403) return "You don't have access to this board.";
+    if (status === 401) return 'Please sign in to open this board.';
+    if (typeof serverError === 'string' && serverError) return serverError;
+    return 'Could not open the board. Please try again.';
+}
+
 export default function SharePageClient({
     token,
     shareTarget,
@@ -31,6 +43,7 @@ export default function SharePageClient({
     padletId,
     permission,
     isPasswordProtected,
+    isSignedIn,
 }: SharePageClientProps) {
     const router = useRouter();
     const [passwordInput, setPasswordInput] = useState('');
@@ -49,6 +62,10 @@ export default function SharePageClient({
     const [padlet, setPadlet] = useState<PadletData | null>(null);
     const [isLoadingPadlet, setIsLoadingPadlet] = useState(false);
     const [padletError, setPadletError] = useState('');
+    // PATCH-357. For a board link, the password proved at the gate is replayed
+    // to the redeem call, and any redeem failure is shown here.
+    const [unlockedPassword, setUnlockedPassword] = useState<string | null>(null);
+    const [redeemError, setRedeemError] = useState('');
 
     // After unlock, fetch padlet data for 'post' target
     useEffect(() => {
@@ -72,22 +89,49 @@ export default function SharePageClient({
             .finally(() => setIsLoadingPadlet(false));
     }, [isUnlocked, shareTarget, targetPadletId, token, grant, isPasswordProtected]);
 
-    // After unlock, redirect for board/post-in-board targets
+    // PATCH-357. After unlock, a board/post-in-board visitor must REDEEM the
+    // link -- which grants their account the board role -- before we send them
+    // in. An unsigned visitor is sent to sign in and return here.
     useEffect(() => {
         if (!isUnlocked) return;
+        if (shareTarget !== 'board' && shareTarget !== 'post-in-board') return;
 
-        if (shareTarget === 'board' && targetBoardId) {
-            router.replace(`/dashboard/canvas/${targetBoardId}`);
+        if (!isSignedIn) {
+            router.replace(`/auth?redirect=${encodeURIComponent(`/share/${token}`)}`);
             return;
         }
-        if (shareTarget === 'post-in-board' && targetBoardId) {
-            const url = targetPadletId
-                ? `/dashboard/canvas/${targetBoardId}?openPadlet=${targetPadletId}`
-                : `/dashboard/canvas/${targetBoardId}`;
-            router.replace(url);
-            return;
-        }
-    }, [isUnlocked, shareTarget, targetBoardId, targetPadletId, router]);
+
+        let cancelled = false;
+        const password = isPasswordProtected ? unlockedPassword : null;
+        void (async () => {
+            try {
+                const res = await fetch('/api/share-link/redeem', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(password ? { token, password } : { token }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (cancelled) return;
+                if (!res.ok) {
+                    setRedeemError(redeemErrorMessage(res.status, data?.error));
+                    return;
+                }
+                const board = typeof data.boardId === 'string' && data.boardId ? data.boardId : targetBoardId;
+                if (!board) {
+                    setRedeemError('This link could not be opened.');
+                    return;
+                }
+                const note = typeof data.padletId === 'string' && data.padletId ? data.padletId : targetPadletId;
+                router.replace(note ? `/dashboard/canvas/${board}?openPadlet=${note}` : `/dashboard/canvas/${board}`);
+            } catch {
+                if (!cancelled) setRedeemError('Could not open the board. Please try again.');
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [
+        isUnlocked, shareTarget, isSignedIn, token, isPasswordProtected,
+        unlockedPassword, targetBoardId, targetPadletId, router,
+    ]);
 
     const handlePasswordSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -108,6 +152,7 @@ export default function SharePageClient({
                 setTargetPermission(
                     typeof data.permission === 'string' && data.permission ? data.permission : 'view',
                 );
+                setUnlockedPassword(passwordInput);
                 setIsUnlocked(true);
             } else {
                 setPasswordError('Incorrect password. Please try again.');
@@ -153,8 +198,18 @@ export default function SharePageClient({
         );
     }
 
-    // Redirecting states (board / post-in-board)
+    // Redeeming states (board / post-in-board): show a failure, else the wait.
     if (shareTarget === 'board' || shareTarget === 'post-in-board') {
+        if (redeemError) {
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                    <div className="text-center">
+                        <h1 className="text-xl font-bold text-gray-800 mb-2">Could not open the board</h1>
+                        <p className="text-gray-500 text-sm">{redeemError}</p>
+                    </div>
+                </div>
+            );
+        }
         return (
             <div className="min-h-screen flex items-center justify-center bg-gray-50">
                 <p className="text-gray-500 text-sm">Redirecting to board...</p>

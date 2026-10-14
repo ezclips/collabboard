@@ -1,15 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
 import { getBoardPermission, boardPermissionSatisfies, mapLegacyToBoardPermission } from '@/lib/auth/permissions';
 import { hashSharePassword } from '@/lib/server/share/sharePassword';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
-// Create a Supabase client for server-side operations
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// PATCH-357. Share links are a service-role table (they carry a password hash),
+// so the server operations use the admin client. There is deliberately NO
+// fallback to the anon key: without the service role the route fails loudly
+// rather than silently reading share_links as an anonymous caller.
+function adminClient() {
+    try {
+        return getSupabaseAdmin();
+    } catch {
+        return null;
+    }
+}
+
+const NOT_CONFIGURED = { error: 'Share links are not configured' } as const;
 
 // Generate a short, URL-safe token
 function generateToken(): string {
@@ -18,6 +27,11 @@ function generateToken(): string {
 
 export async function POST(request: NextRequest) {
     try {
+        const supabase = adminClient();
+        if (!supabase) {
+            return NextResponse.json({ ...NOT_CONFIGURED }, { status: 500 });
+        }
+
         // Authenticate the caller
         const cookieStore = await cookies();
         const userSupabase = createRouteHandlerClient({ cookies: () => cookieStore as any });
@@ -127,6 +141,11 @@ export async function POST(request: NextRequest) {
 // GET: Validate a share link token
 export async function GET(request: NextRequest) {
     try {
+        const supabase = adminClient();
+        if (!supabase) {
+            return NextResponse.json({ ...NOT_CONFIGURED }, { status: 500 });
+        }
+
         const token = request.nextUrl.searchParams.get('token');
 
         if (!token) {

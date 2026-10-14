@@ -21,11 +21,26 @@ const MIN_PASSWORD_LENGTH = 15;
 const MAX_PASSWORD_LENGTH = 64;
 const SUPABASE_RATE_LIMIT_MESSAGE = 'Sign-in is temporarily rate-limited by Supabase. Try again in a few minutes.';
 
+/**
+ * PATCH-357. Open-redirect guard for the `redirect` param. Only a same-origin
+ * RELATIVE path is allowed: it must start with a single `/`. `//host` and
+ * `/\host` are protocol-relative and rejected; anything not starting with `/`
+ * (e.g. `https://host`) and any backslash or control character is rejected too.
+ * Anything else falls back to the dashboard.
+ */
+function sanitizeRedirectPath(raw: string | null): string {
+  if (!raw) return '/dashboard';
+  if (!raw.startsWith('/')) return '/dashboard';
+  if (raw.startsWith('//') || raw.startsWith('/\\')) return '/dashboard';
+  if (raw.includes('\\') || /[\u0000-\u001f\u007f]/.test(raw)) return '/dashboard';
+  return raw;
+}
+
 function AuthForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { supabase } = useSupabase();
-  const redirectPath = searchParams.get('redirect') || '/dashboard';
+  const redirectPath = sanitizeRedirectPath(searchParams.get('redirect'));
   const shouldSwitchAccount = searchParams.get('switch') === '1';
   const requestedMode = searchParams.get('mode');
   
