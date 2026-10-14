@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PRESENCE_COLORS,
+  guestPostStripColor,
   initials,
   overflow,
   presenceColor,
@@ -91,5 +92,22 @@ describe('PATCH-363 overflow', () => {
     expect(overflow(list, 5)).toEqual({ visible: ['a', 'b', 'c', 'd', 'e'], hidden: ['f', 'g'] });
     expect(overflow(['a'], 5)).toEqual({ visible: ['a'], hidden: [] });
     expect(overflow([], 5)).toEqual({ visible: [], hidden: [] });
+  });
+});
+
+describe('PATCH-364 guestPostStripColor', () => {
+  it('is the guest’s own presence colour for a guest-stamped post', () => {
+    expect(guestPostStripColor({ createdBy: 'guest-1', createdByGuest: true }))
+      .toBe(presenceColor('guest-1'));
+  });
+
+  it('is null when not a guest, or the stamp is missing or invalid', () => {
+    expect(guestPostStripColor({ createdBy: 'u1', createdByGuest: false })).toBeNull();
+    expect(guestPostStripColor({ createdBy: 'u1' })).toBeNull();
+    expect(guestPostStripColor({ createdByGuest: true })).toBeNull();
+    expect(guestPostStripColor({ createdBy: '', createdByGuest: true })).toBeNull();
+    expect(guestPostStripColor({ createdBy: 5, createdByGuest: true })).toBeNull();
+    expect(guestPostStripColor(null)).toBeNull();
+    expect(guestPostStripColor(undefined)).toBeNull();
   });
 });

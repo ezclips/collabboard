@@ -124,3 +124,18 @@ export function presencePeople(state: PresenceState, myUserId: string): Presence
 export function overflow<T>(list: readonly T[], max = 5): { visible: T[]; hidden: T[] } {
   return { visible: list.slice(0, max), hidden: list.slice(max) };
 }
+
+/**
+ * PATCH-364. The strip colour a guest's post wears: the SAME colour as that
+ * guest's presence avatar, derived from `createdBy` (stamped by the database
+ * trigger, never by the client). Null for every post that is not a guest's, so
+ * every other post is unchanged.
+ */
+export function guestPostStripColor(metadata: unknown): string | null {
+  const record = metadata as { createdBy?: unknown; createdByGuest?: unknown } | null | undefined;
+  if (!record || record.createdByGuest !== true) return null;
+  const createdBy = record.createdBy;
+  if (typeof createdBy !== 'string' || createdBy.length === 0) return null;
+  return presenceColor(createdBy);
+}
+

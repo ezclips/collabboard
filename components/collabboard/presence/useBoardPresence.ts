@@ -61,8 +61,10 @@ export function useBoardPresence(
           joinedAt: new Date().toISOString(),
         });
       } else if (subscribeStatus === 'CHANNEL_ERROR' || subscribeStatus === 'TIMED_OUT') {
-        // Log ONCE, no toast spam; the stack hides itself on 'unavailable'.
-        console.error('[presence] board channel unavailable', boardId);
+        // A recoverable state, not an error: Supabase retries and a later
+        // SUBSCRIBED sets 'live' again. Warn, never console.error (no red
+        // Next.js overlay for a transient dev-server timeout).
+        console.warn('[presence] board channel not connected yet; retrying');
         setStatus('unavailable');
       }
     });

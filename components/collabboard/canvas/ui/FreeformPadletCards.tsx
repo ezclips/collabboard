@@ -14,6 +14,7 @@ import { resizeImageOuterBoxToAspect } from '@/lib/domain/canvas/imageResizeGeom
 import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplaySource';
 import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
+import { guestPostStripColor } from '@/lib/domain/presence/boardPresence';
 import { formatSummary, summarizeColumn } from '@/lib/domain/canvas/tableNumbers';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -3804,9 +3805,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
             {/* Top strip — 3-column grid: [pencil | title centered | mirror] */}
             {(() => {
               if (isFullView) return null;
-              const freeformStripBg = isStripVisible(padlet.metadata?.topStrip)
+              // PATCH-364. A post the database stamped as a guest's wears that
+              // guest's own presence colour on the strip; every other post keeps
+              // its strip exactly as before.
+              const guestStripColor = guestPostStripColor(padlet.metadata);
+              const freeformStripBg = guestStripColor ?? (isStripVisible(padlet.metadata?.topStrip)
                 ? (padlet.metadata?.topStrip as string)
-                : 'rgba(0,0,0,0.04)';
+                : 'rgba(0,0,0,0.04)');
               const freeformIconColor = isStripVisible(padlet.metadata?.topStrip)
                 ? contrastIconColor(padlet.metadata?.topStrip as string)
                 : '#9ca3af';
@@ -3834,6 +3839,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   */
                   className="relative w-full flex-shrink-0 grid"
                   style={{ gridTemplateColumns: 'auto 1fr auto', minHeight: isContainer ? '28px' : '22px', backgroundColor: freeformStripBg }}
+                  title={guestStripColor ? 'Added by a guest' : undefined}
                 >
                   {/* Left: the PDF's own controls when this post is a PDF,
                       otherwise the expand/export cluster for containers and AI

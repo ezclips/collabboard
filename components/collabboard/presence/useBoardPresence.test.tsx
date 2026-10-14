@@ -24,6 +24,7 @@ import type { PresenceState } from '@/lib/domain/presence/boardPresence';
 let root: Root | null = null;
 let host: HTMLElement;
 let syncHandler: (() => void) | null = null;
+let subscribeCallback: ((status: string) => void) | null = null;
 let presenceState: PresenceState = {};
 let subscribeStatus = 'SUBSCRIBED';
 let trackCalls: unknown[] = [];
@@ -35,7 +36,11 @@ function makeChannel() {
       if (type === 'presence') syncHandler = callback;
       return channel;
     },
-    subscribe: (callback: (status: string) => void) => { callback(subscribeStatus); return channel; },
+    subscribe: (callback: (status: string) => void) => {
+      subscribeCallback = callback;
+      callback(subscribeStatus);
+      return channel;
+    },
     track: (payload: unknown) => { trackCalls.push(payload); return Promise.resolve('ok'); },
     untrack: () => { untrackCalls += 1; return Promise.resolve('ok'); },
     presenceState: () => presenceState,
@@ -73,6 +78,7 @@ beforeEach(() => {
   mocks.channel.mockImplementation(() => makeChannel());
   mocks.removeChannel.mockResolvedValue('ok');
   syncHandler = null;
+  subscribeCallback = null;
   presenceState = {};
   subscribeStatus = 'SUBSCRIBED';
   trackCalls = [];
@@ -113,14 +119,30 @@ describe('PATCH-363 useBoardPresence', () => {
     expect(q('[data-people]')?.getAttribute('data-people')).toBe('u1,u2');
   });
 
-  it('goes unavailable on a channel error, without tracking', async () => {
+  it('warns (never errors) on a channel error, without tracking', async () => {
     subscribeStatus = 'CHANNEL_ERROR';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     await mount();
     expect(q('[data-status]')?.getAttribute('data-status')).toBe('unavailable');
     expect(trackCalls).toHaveLength(0);
-    expect(errorSpy).toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith('[presence] board channel not connected yet; retrying');
+    expect(errorSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
     errorSpy.mockRestore();
+  });
+
+  it('recovers to live and tracks when SUBSCRIBED arrives after a TIMED_OUT', async () => {
+    subscribeStatus = 'TIMED_OUT';
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await mount();
+    expect(q('[data-status]')?.getAttribute('data-status')).toBe('unavailable');
+    expect(trackCalls).toHaveLength(0);
+
+    await act(async () => { subscribeCallback?.('SUBSCRIBED'); });
+    expect(q('[data-status]')?.getAttribute('data-status')).toBe('live');
+    expect(trackCalls).toHaveLength(1);
+    warnSpy.mockRestore();
   });
 
   it('cleans up: untrack and removeChannel', async () => {
