@@ -78,6 +78,10 @@ export default defineConfig({
       // PATCH-302: the Research drop zone and its FreeformPadletCards branch
       // live one level down; without this line their tests are silently NOT RUN.
       'components/collabboard/canvas/ui/*.test.tsx',
+      // PATCH-363: the board presence hook and stack live under
+      // components/collabboard/presence; without this line their tests are
+      // silently NOT RUN (the trap the notes above warn of).
+      'components/collabboard/presence/**/*.test.*',
       'components/settings/ai/*.test.ts',
       'components/settings/ai/*.test.tsx',
       // Shared AI components used by several surfaces (the role model chooser).

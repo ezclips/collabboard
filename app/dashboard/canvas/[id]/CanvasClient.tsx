@@ -123,6 +123,8 @@ import {
 import { SendToKanbanDialog, type SendToKanbanSelection } from '@/components/collabboard/SendToKanbanDialog';
 import NotesAiDialog from '@/components/collabboard/NotesAiDialog';
 import { useNotesAi } from '@/components/collabboard/useNotesAi';
+import { useBoardPresence } from '@/components/collabboard/presence/useBoardPresence';
+import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceStack';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -7159,6 +7161,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     onUpdateNotes: (updates) => updateNotesForTranslate(updates, (fields) => setPadlets(notesAiFieldUpdater(fields))),
   });
 
+  // PATCH-363. Presence: who is on this board right now (all layouts).
+  const boardPresence = useBoardPresence(canvasId ?? null, user ?? null);
+
   // Live chip data: one read per board load, refreshed on focus and every 60 s.
   const kanbanLinks = useMemo<KanbanLinkRef[]>(() => {
     const links: KanbanLinkRef[] = [];
@@ -9555,18 +9560,32 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             onApplyKanbanChanges={canEditBoardContent ? applyKanbanProposedChanges : undefined}
           />
         ) : null}
+        {/* PATCH-363 Addendum 1. Presence on Kanban too. */}
+        <BoardPresenceStack
+          people={boardPresence.people}
+          status={boardPresence.status}
+          myUserId={user?.id ?? ''}
+        />
       </>
     );
   }
 
   if (isGanttLayout) {
     return (
-      <GanttShell
-        canvasId={canvas.id}
-        canvasTitle={canvas.title || 'Untitled canvas'}
-        currentWorkspaceRole={currentWorkspaceRole}
-        onBack={() => router.push('/dashboard')}
-      />
+      <>
+        <GanttShell
+          canvasId={canvas.id}
+          canvasTitle={canvas.title || 'Untitled canvas'}
+          currentWorkspaceRole={currentWorkspaceRole}
+          onBack={() => router.push('/dashboard')}
+        />
+        {/* PATCH-363 Addendum 1. Presence on Gantt too. */}
+        <BoardPresenceStack
+          people={boardPresence.people}
+          status={boardPresence.status}
+          myUserId={user?.id ?? ''}
+        />
+      </>
     );
   }
 
@@ -11162,6 +11181,12 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             )}
 
             <NotesAiDialog {...notesAi.dialogProps} />
+
+            <BoardPresenceStack
+              people={boardPresence.people}
+              status={boardPresence.status}
+              myUserId={user?.id ?? ''}
+            />
 
             {isFreeformLayout && (
               <div
