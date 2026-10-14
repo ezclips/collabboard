@@ -51,3 +51,44 @@ export function shouldUpgradeCollaborator(
   if (existingRank === undefined) return true;
   return ROLE_RANK[newRole] > existingRank;
 }
+
+/** PATCH-360. The permissions `kanban_board_members.permission_level` uses. */
+export type KanbanPermission = 'view' | 'comment' | 'edit' | 'admin';
+
+const KANBAN_RANK: Record<KanbanPermission, number> = {
+  view: 1,
+  comment: 2,
+  edit: 3,
+  admin: 4,
+};
+
+/**
+ * PATCH-360. The board role a share link grants -> the Kanban permission it
+ * grants. Kanban authorises through `kanban_board_members`, which
+ * `board_collaborators` never feeds, so a redeem must write this row too.
+ */
+export function kanbanPermissionForRole(role: ShareLinkRole): KanbanPermission {
+  switch (role) {
+    case 'editor':
+      return 'edit';
+    case 'commenter':
+      return 'comment';
+    case 'viewer':
+      return 'view';
+  }
+}
+
+/**
+ * PATCH-360. True when an existing Kanban permission already grants at least
+ * `wanted`. A missing or unknown existing permission satisfies nothing, so a
+ * row that is absent or unrecognised is replaced rather than trusted.
+ */
+export function kanbanPermissionSatisfies(
+  existing: string | null | undefined,
+  wanted: KanbanPermission,
+): boolean {
+  if (existing === null || existing === undefined) return false;
+  const existingRank = KANBAN_RANK[existing as KanbanPermission];
+  if (existingRank === undefined) return false;
+  return existingRank >= KANBAN_RANK[wanted];
+}

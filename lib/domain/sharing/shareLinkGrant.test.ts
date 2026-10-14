@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { shareLinkRole, shouldUpgradeCollaborator, type ShareLinkRole } from './shareLinkGrant';
+import {
+  kanbanPermissionForRole,
+  kanbanPermissionSatisfies,
+  shareLinkRole,
+  shouldUpgradeCollaborator,
+  type KanbanPermission,
+  type ShareLinkRole,
+} from './shareLinkGrant';
 
 const ROLE_RANK: Record<ShareLinkRole, number> = { viewer: 1, commenter: 2, editor: 3 };
+const KANBAN_RANK: Record<KanbanPermission, number> = { view: 1, comment: 2, edit: 3, admin: 4 };
 
 describe('PATCH-357 shareLinkRole', () => {
   it('maps each legacy permission to its board role', () => {
@@ -46,5 +54,31 @@ describe('PATCH-357 shouldUpgradeCollaborator', () => {
     expect(shouldUpgradeCollaborator('owner', 'viewer')).toBe(true);
     expect(shouldUpgradeCollaborator('banana', 'commenter')).toBe(true);
     expect(shouldUpgradeCollaborator('', 'viewer')).toBe(true);
+  });
+});
+
+describe('PATCH-360 kanbanPermissionForRole', () => {
+  it('maps each board role to its Kanban permission', () => {
+    expect(kanbanPermissionForRole('editor')).toBe('edit');
+    expect(kanbanPermissionForRole('commenter')).toBe('comment');
+    expect(kanbanPermissionForRole('viewer')).toBe('view');
+  });
+});
+
+describe('PATCH-360 kanbanPermissionSatisfies', () => {
+  it('a missing or unknown existing permission satisfies nothing', () => {
+    expect(kanbanPermissionSatisfies(null, 'view')).toBe(false);
+    expect(kanbanPermissionSatisfies(undefined, 'view')).toBe(false);
+    expect(kanbanPermissionSatisfies('banana', 'view')).toBe(false);
+  });
+
+  it('satisfies when the existing rank is at least the wanted rank', () => {
+    const ranks: KanbanPermission[] = ['view', 'comment', 'edit', 'admin'];
+    for (const existing of ranks) {
+      for (const wanted of ranks) {
+        const expected = KANBAN_RANK[existing] >= KANBAN_RANK[wanted];
+        expect(kanbanPermissionSatisfies(existing, wanted), `${existing} >= ${wanted}`).toBe(expected);
+      }
+    }
   });
 });

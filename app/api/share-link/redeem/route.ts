@@ -9,7 +9,12 @@ import {
   mapLegacyToBoardPermission,
 } from '@/lib/auth/permissions';
 import { verifySharePassword } from '@/lib/server/share/sharePassword';
-import { shareLinkRole, shouldUpgradeCollaborator } from '@/lib/domain/sharing/shareLinkGrant';
+import {
+  kanbanPermissionForRole,
+  kanbanPermissionSatisfies,
+  shareLinkRole,
+  shouldUpgradeCollaborator,
+} from '@/lib/domain/sharing/shareLinkGrant';
 
 /**
  * PATCH-357. Redeem a share link for the SIGNED-IN user: grant them the board
@@ -124,8 +129,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'This link grants no board access.' }, { status: 403 });
   }
 
-  // 6. If the user ALREADY has at least this permission (owner, workspace, or a
-  //    higher collaborator row), write nothing.
+  // 6. The user's CURRENT permission, read once. It decides only the
+  //    collaborator step; the Kanban step (7) always runs.
   let existingPermission;
   try {
     existingPermission = await getBoardPermission(admin, link.board_id, user.id);
@@ -134,6 +139,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Could not check your access.' }, { status: 503 });
   }
 
+  // 6a. Board collaborator grant. If the user ALREADY has at least this
+  //     permission (owner, workspace, or a higher collaborator row), write
+  //     nothing; otherwise add or upgrade the collaborator row, never
+  //     downgrading.
   if (!boardPermissionSatisfies(existingPermission, requiredPermission)) {
     const { data: existing, error: existingError } = await admin
       .from('board_collaborators')
@@ -160,7 +169,61 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // 7. Access bookkeeping. A failure here never blocks the grant.
+  // 7. PATCH-360. Kanban membership. Kanban authorises through
+  //    `kanban_board_members`, which `board_collaborators` never feeds -- so a
+  //    share link to a Kanban board granted nothing. This runs for EVERY board
+  //    layout (the owner's own row is created for every layout, and a board can
+  //    switch to Kanban later) and it runs EVEN WHEN step 6 was skipped: a
+  //    pre-existing collaborator or a workspace member still needs their Kanban
+  //    row. Never downgrades -- the owner's `admin` row is never touched.
+  const kanbanPermission = kanbanPermissionForRole(collaboratorRole);
+  const { data: existingKanban, error: kanbanLookupError } = await admin
+    .from('kanban_board_members')
+    .select('permission_level')
+    .eq('canvas_id', link.board_id)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (kanbanLookupError) {
+    console.error('Kanban membership lookup failed:', kanbanLookupError);
+    return NextResponse.json({ error: 'Could not grant Kanban board access.' }, { status: 500 });
+  }
+  const existingKanbanPermission =
+    (existingKanban as { permission_level?: string | null } | null)?.permission_level ?? null;
+  if (!kanbanPermissionSatisfies(existingKanbanPermission, kanbanPermission)) {
+    if (existingKanban === null) {
+      // PATCH-360 Addendum 1. ON CONFLICT DO NOTHING, not a plain insert: two
+      // redeems at once (React dev double-mount, a double click, two tabs) both
+      // see "no row" and both write. The loser must succeed, not 500 on the
+      // unique key.
+      const { error: kanbanInsertError } = await admin
+        .from('kanban_board_members')
+        .upsert(
+          {
+            canvas_id: link.board_id,
+            user_id: user.id,
+            role: 'member',
+            permission_level: kanbanPermission,
+          },
+          { onConflict: 'canvas_id,user_id', ignoreDuplicates: true },
+        );
+      if (kanbanInsertError) {
+        console.error('Could not grant Kanban board access:', kanbanInsertError);
+        return NextResponse.json({ error: 'Could not grant Kanban board access.' }, { status: 500 });
+      }
+    } else {
+      const { error: kanbanUpdateError } = await admin
+        .from('kanban_board_members')
+        .update({ permission_level: kanbanPermission })
+        .eq('canvas_id', link.board_id)
+        .eq('user_id', user.id);
+      if (kanbanUpdateError) {
+        console.error('Could not grant Kanban board access:', kanbanUpdateError);
+        return NextResponse.json({ error: 'Could not grant Kanban board access.' }, { status: 500 });
+      }
+    }
+  }
+
+  // 8. Access bookkeeping. A failure here never blocks the grant.
   const { error: accessError } = await admin
     .from('share_links')
     .update({

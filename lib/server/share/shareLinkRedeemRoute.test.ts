@@ -33,6 +33,11 @@ interface FakeState {
   existingCollaborator: { role: string | null } | null;
   upsertError: { message?: string } | null;
   updateError: { message?: string } | null;
+  // PATCH-360. The Kanban membership step.
+  existingKanbanMember: { permission_level: string | null } | null;
+  kanbanLookupError: { message?: string } | null;
+  kanbanUpsertError: { message?: string } | null;
+  kanbanUpdateError: { message?: string } | null;
 }
 
 const state: FakeState = {
@@ -43,6 +48,10 @@ const state: FakeState = {
   existingCollaborator: null,
   upsertError: null,
   updateError: null,
+  existingKanbanMember: null,
+  kanbanLookupError: null,
+  kanbanUpsertError: null,
+  kanbanUpdateError: null,
 };
 
 const calls = {
@@ -50,7 +59,19 @@ const calls = {
   upsertOptions: [] as unknown[],
   updates: [] as Array<Record<string, unknown>>,
   rpc: [] as Array<{ name: string; args: Record<string, unknown> }>,
+  // PATCH-360.
+  kanbanUpserts: [] as Array<Record<string, unknown>>,
+  kanbanUpsertOptions: [] as unknown[],
+  kanbanUpdates: [] as Array<Record<string, unknown>>,
 };
+
+/** A thenable that is also chainable, so `.eq().eq()` and `await .eq()` both work. */
+function chainable(error: unknown) {
+  const chain: Record<string, unknown> = {};
+  chain.eq = () => chain;
+  chain.then = (resolve: (value: { error: unknown }) => unknown) => resolve({ error });
+  return chain;
+}
 
 function makeFakeAdmin() {
   return {
@@ -70,21 +91,40 @@ function makeFakeAdmin() {
               if (table === 'board_collaborators') {
                 return { data: state.existingCollaborator, error: null };
               }
+              if (table === 'kanban_board_members') {
+                return {
+                  data: state.kanbanLookupError ? null : state.existingKanbanMember,
+                  error: state.kanbanLookupError,
+                };
+              }
               return { data: null, error: null };
             },
           };
           return chain;
         },
+        insert(payload: Record<string, unknown>) {
+          // Unused by the route now (the Kanban step upserts); kept so a stray
+          // insert is visible rather than silently succeeding.
+          calls.kanbanUpserts.push(payload);
+          return Promise.resolve({ error: state.kanbanUpsertError });
+        },
         upsert(payload: Record<string, unknown>, options?: unknown) {
+          if (table === 'kanban_board_members') {
+            calls.kanbanUpserts.push(payload);
+            calls.kanbanUpsertOptions.push(options);
+            return Promise.resolve({ error: state.kanbanUpsertError });
+          }
           calls.upserts.push(payload);
           calls.upsertOptions.push(options);
           return Promise.resolve({ error: state.upsertError });
         },
         update(payload: Record<string, unknown>) {
+          if (table === 'kanban_board_members') {
+            calls.kanbanUpdates.push(payload);
+            return chainable(state.kanbanUpdateError);
+          }
           calls.updates.push(payload);
-          return {
-            eq: (_column: string, _value: unknown) => Promise.resolve({ error: state.updateError }),
-          };
+          return chainable(state.updateError);
         },
       };
     },
@@ -155,6 +195,10 @@ beforeEach(async () => {
   state.existingCollaborator = null;
   state.upsertError = null;
   state.updateError = null;
+  state.existingKanbanMember = null;
+  state.kanbanLookupError = null;
+  state.kanbanUpsertError = null;
+  state.kanbanUpdateError = null;
   mocks.cookies.mockResolvedValue({});
   session();
   sharePassword = await import('@/lib/server/share/sharePassword');
@@ -292,6 +336,117 @@ describe('PATCH-357 redeem: granting the role', () => {
     const response = await post({ token: TOKEN });
     expect(response.status).toBe(503);
     expect(calls.upserts).toHaveLength(0);
+  });
+});
+
+describe('PATCH-360 redeem: Kanban membership', () => {
+  it('upserts a kanban_board_members row when the user has none', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    expect(calls.kanbanUpserts).toHaveLength(1);
+    expect(calls.kanbanUpserts[0]).toEqual({
+      canvas_id: BOARD_ID,
+      user_id: USER_ID,
+      role: 'member',
+      permission_level: 'edit',
+    });
+    // PATCH-360 Addendum 1: ON CONFLICT DO NOTHING, so a losing race succeeds.
+    expect(calls.kanbanUpsertOptions[0]).toEqual({
+      onConflict: 'canvas_id,user_id',
+      ignoreDuplicates: true,
+    });
+  });
+
+  it('PATCH-360 Addendum 1: a losing race (row already exists) still returns 200', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    // The upsert with ignoreDuplicates reports no error when the row is already
+    // there -- exactly what the request that loses the race sees.
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    expect(calls.kanbanUpsertOptions[0]).toMatchObject({ ignoreDuplicates: true });
+  });
+
+  it('maps view -> view and comment -> comment', async () => {
+    state.link = openLink({ permission: 'view' });
+    state.permission = null;
+    await post({ token: TOKEN });
+    expect(calls.kanbanUpserts[0].permission_level).toBe('view');
+
+    calls.kanbanUpserts.length = 0;
+    state.link = openLink({ permission: 'comment' });
+    await post({ token: TOKEN });
+    expect(calls.kanbanUpserts[0].permission_level).toBe('comment');
+  });
+
+  it('never downgrades an existing admin row', async () => {
+    state.link = openLink({ permission: 'view' });
+    state.permission = 'admin'; // board permission already satisfies; step 6 skipped
+    state.existingKanbanMember = { permission_level: 'admin' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    expect(calls.kanbanUpserts).toHaveLength(0);
+    expect(calls.kanbanUpdates).toHaveLength(0);
+  });
+
+  it('never downgrades an existing edit row', async () => {
+    state.link = openLink({ permission: 'view' });
+    state.permission = 'admin';
+    state.existingKanbanMember = { permission_level: 'edit' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    expect(calls.kanbanUpserts).toHaveLength(0);
+    expect(calls.kanbanUpdates).toHaveLength(0);
+  });
+
+  it('upgrades an existing view row to edit', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    state.existingKanbanMember = { permission_level: 'view' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    expect(calls.kanbanUpserts).toHaveLength(0);
+    expect(calls.kanbanUpdates).toHaveLength(1);
+    expect(calls.kanbanUpdates[0]).toEqual({ permission_level: 'edit' });
+  });
+
+  it('runs even when the collaborator step was skipped (the early-return path)', async () => {
+    state.link = openLink({ permission: 'view' });
+    state.permission = 'editor'; // board permission satisfies a view link
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(200);
+    // No collaborator write, but the Kanban row is still ensured.
+    expect(calls.upserts).toHaveLength(0);
+    expect(calls.kanbanUpserts).toHaveLength(1);
+    expect(calls.kanbanUpserts[0].permission_level).toBe('view');
+  });
+
+  it('500 with a clear error when the Kanban upsert fails, never swallowed', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    state.kanbanUpsertError = { message: 'boom' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: 'Could not grant Kanban board access.' });
+  });
+
+  it('500 when the Kanban update fails', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    state.existingKanbanMember = { permission_level: 'view' };
+    state.kanbanUpdateError = { message: 'boom' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(500);
+  });
+
+  it('500 when the Kanban lookup fails', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    state.kanbanLookupError = { message: 'boom' };
+    const response = await post({ token: TOKEN });
+    expect(response.status).toBe(500);
   });
 });
 
