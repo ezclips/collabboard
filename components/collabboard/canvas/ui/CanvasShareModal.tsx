@@ -3,8 +3,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { canManageWorkspace, workspaceRoleDescriptions, type InvitableWorkspaceRole, type WorkspaceRole } from '@/lib/workspace/context';
 import { supabaseBrowser } from '@/lib/supabase/browser';
-import { Check, ChevronDown, Copy, Link2, Loader2, Mail, X } from 'lucide-react';
+import { Check, ChevronDown, Copy, Link2, Loader2, Mail, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
+import CanvasPeopleTab from './CanvasPeopleTab';
 
 interface CanvasShareModalProps {
   isOpen: boolean;
@@ -14,7 +15,7 @@ interface CanvasShareModalProps {
   currentWorkspaceRole: WorkspaceRole | null;
 }
 
-type ShareTab = 'email' | 'link';
+type ShareTab = 'email' | 'link' | 'people';
 
 function generateInvitationPassword() {
   return Math.random().toString(36).substring(2, 10);
@@ -251,6 +252,16 @@ export default function CanvasShareModal({
               <Link2 className="h-4 w-4" />
               Invite link
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('people')}
+              className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition ${
+                activeTab === 'people' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              People
+            </button>
           </div>
 
           {!canManageShare ? (
@@ -289,7 +300,7 @@ export default function CanvasShareModal({
                 <p className="mt-2 text-sm text-gray-500">{workspaceRoleDescriptions[inviteUserRole]}</p>
               </div>
             </div>
-          ) : (
+          ) : activeTab === 'link' ? (
             <div className="space-y-5">
               {!generatedLink ? (
                 <>
@@ -396,6 +407,8 @@ export default function CanvasShareModal({
                 </div>
               )}
             </div>
+          ) : (
+            <CanvasPeopleTab canvasId={canvasId} />
           )}
         </div>
 
@@ -417,7 +430,7 @@ export default function CanvasShareModal({
               {invitingUser ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Invite
             </button>
-          ) : !generatedLink ? (
+          ) : activeTab === 'link' && !generatedLink ? (
             <button
               type="button"
               onClick={handleCreateInviteLink}
