@@ -15,6 +15,7 @@ import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplay
 import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import { guestPostStripColor } from '@/lib/domain/presence/boardPresence';
+import { guestAlias } from '@/lib/domain/presence/guestAlias';
 import { PENDING_LABEL, approvedMetadata, isPendingApproval } from '@/lib/domain/canvas/postApproval';
 import { formatSummary, summarizeColumn } from '@/lib/domain/canvas/tableNumbers';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
@@ -351,6 +352,11 @@ export interface FreeformPadletCardsProps {
    * own approval echo and leave the card showing "Waiting for approval".
    */
   onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  /**
+   * PATCH-368. When on, a NEW comment written by a guest stores the stable alias
+   * as its author instead of the guest's typed name.
+   */
+  hideGuestNames?: boolean;
 }
 
 // PATCH FREEFORM-IMAGE-R4: a genuine top-level component (not a closure
@@ -626,7 +632,17 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     kanbanLinkStatus, onSendToKanban, onOpenKanbanCard, onUnlinkKanban, onAiOnNotes,
     canApproveGuestPosts = false,
     onApproveGuestPost,
+    hideGuestNames = false,
   } = props;
+  /**
+   * PATCH-368. The author name a NEW comment stores. A guest's own comment
+   * stores the stable alias while Hide guest names is on; every other writer
+   * keeps the name the call site already computed.
+   */
+  const commentAuthorName = React.useCallback((base: string): string => {
+    const isGuest = (user as { is_anonymous?: boolean } | null)?.is_anonymous === true;
+    return hideGuestNames && isGuest && user?.id ? guestAlias(user.id) : base;
+  }, [hideGuestNames, user]);
   /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
    * but route a rejected builder into their local catch. Preserve both
@@ -2129,7 +2145,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: user?.email?.split('@')[0] || 'You',
+                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...currentComments, newComment];
@@ -2961,7 +2977,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: user?.email?.split('@')[0] || 'You',
+                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...cardCommentList, newComment];
@@ -3418,7 +3434,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                               id: `comment-${Date.now()}`,
                               text: commentText,
                               userId: user?.id || 'anon',
-                              userName: user?.email?.split('@')[0] || 'You',
+                              userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                               timestamp: Date.now()
                             };
                             const currentComments = padlet.metadata?.comments || [];
@@ -3468,7 +3484,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text,
                       userId: user?.id || 'anon',
-                      userName: user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous',
+                      userName: commentAuthorName(user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'),
                       userAvatar: user?.user_metadata?.avatar_url,
                       timestamp: Date.now(),
                     };
@@ -5070,7 +5086,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: user?.email?.split('@')[0] || 'You',
+                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5249,7 +5265,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: user?.email?.split('@')[0] || 'You',
+                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5415,7 +5431,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: user?.email?.split('@')[0] || 'You',
+                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5730,7 +5746,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         id: `comment-${Date.now()}`,
                         text: commentText,
                         userId: user?.id || 'anon',
-                        userName: user?.email?.split('@')[0] || 'You',
+                        userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                         timestamp: Date.now(),
                       };
                       const nextComments = [...currentComments, newComment];
@@ -6351,7 +6367,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: user?.email?.split('@')[0] || 'You',
+                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...currentComments, newComment];

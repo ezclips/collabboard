@@ -29,12 +29,12 @@ const PEOPLE: PresencePerson[] = [
   person('u7', 'Gus'),
 ];
 
-async function mount(people: PresencePerson[], status: BoardPresenceStatus, myUserId = 'u1') {
+async function mount(people: PresencePerson[], status: BoardPresenceStatus, myUserId = 'u1', hideGuestNames = false) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<BoardPresenceStack people={people} status={status} myUserId={myUserId} />);
+    root!.render(<BoardPresenceStack people={people} status={status} myUserId={myUserId} hideGuestNames={hideGuestNames} />);
   });
 }
 
@@ -96,5 +96,21 @@ describe('PATCH-363 BoardPresenceStack', () => {
     await mount([person('u1', 'Ada Lovelace')], 'live');
     expect(all('[data-presence-person]')).toHaveLength(1);
     expect(q('[data-presence-overflow]')).toBeNull();
+  });
+
+  // PATCH-368. Another guest shows as the stable alias while names are hidden.
+  it('shows another guest as the alias while names are hidden', async () => {
+    const people = [
+      person('u1', 'Ada Lovelace'),
+      person('b1000000-0000-4000-8000-0000000000b2', 'Bob', true),
+    ];
+    await mount(people, 'live', 'u1', true);
+    await act(async () => { host.querySelector('button')!.click(); });
+
+    const list = q('[data-presence-list]');
+    expect(list?.textContent).toContain('Guest 70');
+    expect(list?.textContent).not.toContain('Bob');
+    // Me is never hidden.
+    expect(list?.textContent).toContain('Ada Lovelace');
   });
 });

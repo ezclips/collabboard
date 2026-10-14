@@ -124,6 +124,7 @@ import { SendToKanbanDialog, type SendToKanbanSelection } from '@/components/col
 import NotesAiDialog from '@/components/collabboard/NotesAiDialog';
 import { useNotesAi } from '@/components/collabboard/useNotesAi';
 import { useBoardPresence } from '@/components/collabboard/presence/useBoardPresence';
+import { useBoardGuestSettings } from '@/components/collabboard/canvas/hooks/useBoardGuestSettings';
 import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceStack';
 import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
 import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
@@ -7205,7 +7206,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   });
 
   // PATCH-363. Presence: who is on this board right now (all layouts).
-  const boardPresence = useBoardPresence(canvasId ?? null, user ?? null);
+  // PATCH-368. The board's guest-name flag, live; it gates the presence payload
+  // (a guest sends name: null) and the rendered alias.
+  const { hideGuestNames } = useBoardGuestSettings(canvasId);
+  const boardPresence = useBoardPresence(canvasId ?? null, user ?? null, hideGuestNames);
 
   // Live chip data: one read per board load, refreshed on focus and every 60 s.
   const kanbanLinks = useMemo<KanbanLinkRef[]>(() => {
@@ -9608,6 +9612,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           people={boardPresence.people}
           status={boardPresence.status}
           myUserId={user?.id ?? ''}
+          hideGuestNames={hideGuestNames}
         />
         {/* PATCH-366. Freeze banner on Kanban too. */}
         <FrozenBoardBanner
@@ -9633,6 +9638,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           people={boardPresence.people}
           status={boardPresence.status}
           myUserId={user?.id ?? ''}
+          hideGuestNames={hideGuestNames}
         />
         {/* PATCH-366. Freeze banner on Gantt too. */}
         <FrozenBoardBanner
@@ -11219,6 +11225,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     onAiOnNotes={canEditBoardContent ? notesAi.open : undefined}
                     canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
                     onApproveGuestPost={approveGuestPostNow}
+                    hideGuestNames={hideGuestNames}
                   />
                 </CanvasEditorProvider>
               </CanvasConfigProvider>
@@ -11243,6 +11250,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               people={boardPresence.people}
               status={boardPresence.status}
               myUserId={user?.id ?? ''}
+              hideGuestNames={hideGuestNames}
             />
 
             {/* PATCH-366. Freeze banner (all layouts). */}

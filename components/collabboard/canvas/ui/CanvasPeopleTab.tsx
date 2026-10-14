@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, UserMinus } from 'lucide-react';
 
 import { boardPersonRoleLabel, type BoardPerson } from '@/lib/domain/sharing/boardPeople';
+import { useBoardGuestSettings } from '@/components/collabboard/canvas/hooks/useBoardGuestSettings';
 
 export interface CanvasPeopleTabProps {
   readonly canvasId: string;
@@ -21,6 +22,7 @@ export interface CanvasPeopleTabProps {
 const FORBIDDEN = 'Only the board owner can manage access.';
 
 export default function CanvasPeopleTab({ canvasId }: CanvasPeopleTabProps) {
+  const { hideGuestNames } = useBoardGuestSettings(canvasId);
   const [people, setPeople] = useState<readonly BoardPerson[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -159,6 +161,12 @@ export default function CanvasPeopleTab({ canvasId }: CanvasPeopleTabProps) {
       <p className="text-xs text-gray-500">
         Removed people can join again while a share link is still valid.
       </p>
+
+      {hideGuestNames ? (
+        <p data-people-hidden-note="true" className="text-xs text-amber-700">
+          Hidden from others while Hide guest names is on.
+        </p>
+      ) : null}
     </div>
   );
 }

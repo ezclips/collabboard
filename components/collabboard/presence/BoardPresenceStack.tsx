@@ -12,18 +12,24 @@
 import React, { useState } from 'react';
 
 import { initials, overflow, type PresencePerson } from '@/lib/domain/presence/boardPresence';
+import { displayNameFor } from '@/lib/domain/presence/guestAlias';
 import type { BoardPresenceStatus } from './useBoardPresence';
 
 export interface BoardPresenceStackProps {
   readonly people: readonly PresencePerson[];
   readonly status: BoardPresenceStatus;
   readonly myUserId: string;
+  /**
+   * PATCH-368. Applied again at render (defence in depth): a guest who is not me
+   * shows as the stable alias even if a stale payload still carried a name.
+   */
+  readonly hideGuestNames?: boolean;
 }
 
 const AVATAR = 28;
 const MAX_AVATARS = 5;
 
-function Avatar({ person, ring }: { person: PresencePerson; ring: boolean }) {
+function Avatar({ person, label, ring }: { person: PresencePerson; label: string; ring: boolean }) {
   return (
     <span
       className="flex items-center justify-center rounded-full text-[11px] font-semibold text-white"
@@ -33,17 +39,25 @@ function Avatar({ person, ring }: { person: PresencePerson; ring: boolean }) {
         backgroundColor: person.color,
         boxShadow: ring ? '0 0 0 2px #ffffff, 0 0 0 4px #6366f1' : '0 0 0 2px #ffffff',
       }}
-      title={person.name}
+      title={label}
     >
-      {initials(person.name)}
+      {initials(label)}
     </span>
   );
 }
 
-export default function BoardPresenceStack({ people, status, myUserId }: BoardPresenceStackProps) {
+export default function BoardPresenceStack({ people, status, myUserId, hideGuestNames = false }: BoardPresenceStackProps) {
   const [open, setOpen] = useState(false);
 
   if (status !== 'live' || people.length === 0) return null;
+
+  const labelFor = (person: PresencePerson) => displayNameFor({
+    name: person.name,
+    userId: person.userId,
+    isGuest: person.isGuest,
+    isMe: person.userId === myUserId,
+    hideGuestNames,
+  });
 
   const { visible, hidden } = overflow(people, MAX_AVATARS);
 
@@ -67,9 +81,9 @@ export default function BoardPresenceStack({ people, status, myUserId }: BoardPr
             <ul className="space-y-0.5">
               {people.map((person) => (
                 <li key={person.userId} className="flex items-center gap-2 rounded-lg px-1 py-1">
-                  <Avatar person={person} ring={person.userId === myUserId} />
+                  <Avatar person={person} label={labelFor(person)} ring={person.userId === myUserId} />
                   <span className="min-w-0 flex-1 truncate text-sm text-gray-800">
-                    {person.name}
+                    {labelFor(person)}
                     {person.userId === myUserId ? <span className="text-gray-400"> (you)</span> : null}
                   </span>
                   {person.isGuest ? (
@@ -96,7 +110,7 @@ export default function BoardPresenceStack({ people, status, myUserId }: BoardPr
             data-presence-person="true"
             style={{ marginLeft: index === 0 ? 0 : -8, zIndex: visible.length - index }}
           >
-            <Avatar person={person} ring={person.userId === myUserId} />
+            <Avatar person={person} label={labelFor(person)} ring={person.userId === myUserId} />
           </span>
         ))}
         {hidden.length > 0 ? (

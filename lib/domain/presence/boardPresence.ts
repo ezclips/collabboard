@@ -4,7 +4,13 @@
  *
  * The name NEVER falls back to the email: a guest sees this list, and a guest
  * must never see another member's email (PATCH-360).
+ *
+ * PATCH-368. Names go through `displayNameFor`, so another guest shows as the
+ * stable alias while names are hidden -- even if a stale payload still carried a
+ * name.
  */
+
+import { displayNameFor } from './guestAlias';
 
 export interface PresenceUserLike {
   readonly id: string;
@@ -88,8 +94,11 @@ export type PresenceState = Record<string, readonly PresenceMeta[]>;
 /**
  * Presence state -> the people list. Several tabs of one user count ONCE (the
  * earliest `joinedAt` wins). Me first, then everyone else by `joinedAt`.
+ *
+ * PATCH-368. `hideGuestNames` shows another guest as the stable alias; a guest
+ * with `name: null` and the flag off falls back to "Guest".
  */
-export function presencePeople(state: PresenceState, myUserId: string): PresencePerson[] {
+export function presencePeople(state: PresenceState, myUserId: string, hideGuestNames = false): PresencePerson[] {
   const people: PresencePerson[] = [];
   for (const [userId, metas] of Object.entries(state)) {
     if (!Array.isArray(metas) || metas.length === 0) continue;
@@ -99,13 +108,19 @@ export function presencePeople(state: PresenceState, myUserId: string): Presence
       return aAt < bAt ? -1 : aAt > bAt ? 1 : 0;
     });
     const first = ordered[0] ?? {};
-    const name = typeof first.name === 'string' && first.name.trim().length > 0
-      ? first.name.trim().slice(0, NAME_MAX)
-      : 'Member';
+    const isGuest = first.isGuest === true;
+    const rawName = typeof first.name === 'string' ? first.name : null;
+    const name = displayNameFor({
+      name: rawName,
+      userId,
+      isGuest,
+      isMe: userId === myUserId,
+      hideGuestNames,
+    }).slice(0, NAME_MAX);
     people.push({
       userId,
       name,
-      isGuest: first.isGuest === true,
+      isGuest,
       color: typeof first.color === 'string' && first.color.length > 0 ? first.color : presenceColor(userId),
       joinedAt: typeof first.joinedAt === 'string' ? first.joinedAt : '',
     });

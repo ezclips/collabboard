@@ -48,8 +48,8 @@ function makeChannel() {
   return channel;
 }
 
-function Harness({ boardId, user }: { boardId: string; user: { id: string; is_anonymous?: boolean; user_metadata?: Record<string, unknown> } }) {
-  const { people, status } = useBoardPresence(boardId, user);
+function Harness({ boardId, user, hideGuestNames = false }: { boardId: string; user: { id: string; is_anonymous?: boolean; user_metadata?: Record<string, unknown> }; hideGuestNames?: boolean }) {
+  const { people, status } = useBoardPresence(boardId, user, hideGuestNames);
   return (
     <div
       data-people={people.map((person) => person.userId).join(',')}
@@ -61,12 +61,13 @@ function Harness({ boardId, user }: { boardId: string; user: { id: string; is_an
 async function mount(
   boardId = 'board-1',
   user: { id: string; is_anonymous?: boolean; user_metadata?: Record<string, unknown> } = { id: 'u1', user_metadata: { full_name: 'Ada' } },
+  hideGuestNames = false,
 ) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root!.render(<Harness boardId={boardId} user={user} />);
+    root!.render(<Harness boardId={boardId} user={user} hideGuestNames={hideGuestNames} />);
   });
 }
 
@@ -152,5 +153,35 @@ describe('PATCH-363 useBoardPresence', () => {
     root = null;
     expect(untrackCalls).toBe(1);
     expect(mocks.removeChannel).toHaveBeenCalledTimes(1);
+  });
+
+  // PATCH-368. The real name must not travel while names are hidden.
+  it('tracks name: null for a guest while names are hidden', async () => {
+    await mount('board-1', { id: 'u1', is_anonymous: true, user_metadata: { display_name: 'Guesty' } }, true);
+    expect(trackCalls).toHaveLength(1);
+    expect(trackCalls[0]).toMatchObject({ name: null, isGuest: true });
+  });
+
+  it('never sends name: null for a registered user', async () => {
+    await mount('board-1', { id: 'u1', user_metadata: { full_name: 'Ada' } }, true);
+    expect(trackCalls[0]).toMatchObject({ name: 'Ada', isGuest: false });
+  });
+
+  it('re-tracks on the same channel when the flag flips', async () => {
+    const user = { id: 'u1', is_anonymous: true, user_metadata: { display_name: 'Guesty' } };
+    await mount('board-1', user, false);
+    expect(mocks.channel).toHaveBeenCalledTimes(1);
+    expect(trackCalls).toHaveLength(1);
+    expect(trackCalls[0]).toMatchObject({ name: 'Guesty' });
+
+    await act(async () => {
+      root!.render(<Harness boardId="board-1" user={{ ...user }} hideGuestNames />);
+    });
+
+    expect(mocks.channel, 'the channel is not re-subscribed').toHaveBeenCalledTimes(1);
+    expect(trackCalls).toHaveLength(2);
+    expect(trackCalls[1]).toMatchObject({ name: null, isGuest: true });
+    // The same joinedAt, so a re-track never reorders the list.
+    expect((trackCalls[0] as { joinedAt: string }).joinedAt).toBe((trackCalls[1] as { joinedAt: string }).joinedAt);
   });
 });

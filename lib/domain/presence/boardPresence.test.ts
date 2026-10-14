@@ -86,6 +86,32 @@ describe('PATCH-363 presencePeople', () => {
   });
 });
 
+describe('PATCH-368 presencePeople names', () => {
+  const A = 'a1000000-0000-4000-8000-0000000000b1';
+  const B = 'b1000000-0000-4000-8000-0000000000b2';
+
+  it('shows another guest as the alias while hidden', () => {
+    const state: PresenceState = { [A]: [{ name: 'Ada', isGuest: true, joinedAt: 'x' }] };
+    expect(presencePeople(state, B, true)[0].name).toBe('Guest 33');
+    expect(presencePeople(state, B, false)[0].name).toBe('Ada');
+  });
+
+  it('falls back to "Guest" for a guest with name: null and the flag off', () => {
+    const state: PresenceState = { [A]: [{ name: null as unknown as string, isGuest: true, joinedAt: 'x' }] };
+    expect(presencePeople(state, B, false)[0].name).toBe('Guest');
+  });
+
+  it('never hides me from myself, and never hides a registered user', () => {
+    const state: PresenceState = {
+      [A]: [{ name: 'Ada', isGuest: true, joinedAt: 'x' }],
+      [B]: [{ name: 'Bob', isGuest: false, joinedAt: 'y' }],
+    };
+    const people = presencePeople(state, A, true);
+    expect(people.find((p) => p.userId === A)?.name).toBe('Ada');
+    expect(people.find((p) => p.userId === B)?.name).toBe('Bob');
+  });
+});
+
 describe('PATCH-363 overflow', () => {
   it('splits into visible and hidden at the cap', () => {
     const list = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
