@@ -108,3 +108,23 @@ return. The hook already runs for every layout. Render the same
 `<BoardPresenceStack people={boardPresence.people} status={boardPresence.status} myUserId={user?.id ?? ''} />`
 inside the Kanban fragment, and wrap the Gantt return in a fragment with it. No other
 changes. Allowed files: `CanvasClient.tsx`. Run `npx tsc --noEmit`. No git.
+
+## Addendum 2 — the avatars must not move when the list opens (owner's screenshot)
+In `BoardPresenceStack.tsx` the list is in normal flow above the button inside the fixed
+box. Opening it widens the box to `w-56`, and the button, which is left-aligned in the
+box, jumps left; the list and the avatars line up on the LEFT. In a bottom-right corner
+both must line up on the RIGHT, and the avatars must never move.
+
+Fix:
+- The fixed box only wraps the button (it keeps `bottom: 16, right: 16`) and gets
+  `relative`.
+- The list becomes `absolute right-0 bottom-full`, so it opens upward, flush with the
+  button's right edge, and never changes the box's size.
+- Use padding (`pb-2`) on the absolute wrapper instead of `mb-2` on the list, so the
+  hover area is continuous from the avatars up into the list and it does not close
+  while the mouse moves up.
+- Widen the list to `w-64` so names truncate less.
+
+Component test: the list wrapper carries `absolute`, `right-0` and `bottom-full`
+classes, and the button is unchanged. Allowed files: `BoardPresenceStack.tsx` and its
+test. No git.

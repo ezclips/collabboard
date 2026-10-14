@@ -66,6 +66,21 @@ describe('PATCH-363 BoardPresenceStack', () => {
     expect(list?.textContent).toContain('Guest');
   });
 
+  it('anchors the list above the avatars (absolute, right-aligned) and never moves the button', async () => {
+    await mount(PEOPLE, 'live');
+    const buttonBefore = q('button');
+    await act(async () => { buttonBefore!.click(); });
+
+    const wrapper = q('[data-presence-list]')?.parentElement;
+    expect(wrapper?.className).toContain('absolute');
+    expect(wrapper?.className).toContain('right-0');
+    expect(wrapper?.className).toContain('bottom-full');
+    expect(wrapper?.className).toContain('pb-2');
+    expect(q('[data-presence-list]')?.className).toContain('w-64');
+    // The button node is unchanged -- opening the list did not re-flow it.
+    expect(q('button')).toBe(buttonBefore);
+  });
+
   it('hides itself while connecting or unavailable', async () => {
     await mount(PEOPLE, 'connecting');
     expect(q('[data-presence-stack]')).toBeNull();

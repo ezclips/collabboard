@@ -56,26 +56,31 @@ export default function BoardPresenceStack({ people, status, myUserId }: BoardPr
       onMouseLeave={() => setOpen(false)}
     >
       {open ? (
-        <div
-          data-presence-list="true"
-          className="mb-2 w-56 rounded-xl border border-gray-200 bg-white p-2 shadow-xl"
-        >
-          <ul className="space-y-0.5">
-            {people.map((person) => (
-              <li key={person.userId} className="flex items-center gap-2 rounded-lg px-1 py-1">
-                <Avatar person={person} ring={person.userId === myUserId} />
-                <span className="min-w-0 flex-1 truncate text-sm text-gray-800">
-                  {person.name}
-                  {person.userId === myUserId ? <span className="text-gray-400"> (you)</span> : null}
-                </span>
-                {person.isGuest ? (
-                  <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
-                    Guest
+        // Absolute, so the list never changes the box's size -- the avatars stay
+        // put. `bottom-full right-0` opens it upward, flush with the button's
+        // right edge; `pb-2` keeps the hover area continuous up into the list.
+        <div className="absolute bottom-full right-0 pb-2">
+          <div
+            data-presence-list="true"
+            className="w-64 rounded-xl border border-gray-200 bg-white p-2 shadow-xl"
+          >
+            <ul className="space-y-0.5">
+              {people.map((person) => (
+                <li key={person.userId} className="flex items-center gap-2 rounded-lg px-1 py-1">
+                  <Avatar person={person} ring={person.userId === myUserId} />
+                  <span className="min-w-0 flex-1 truncate text-sm text-gray-800">
+                    {person.name}
+                    {person.userId === myUserId ? <span className="text-gray-400"> (you)</span> : null}
                   </span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
+                  {person.isGuest ? (
+                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
+                      Guest
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       ) : null}
 
