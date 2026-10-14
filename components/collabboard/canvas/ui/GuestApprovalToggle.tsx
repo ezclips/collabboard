@@ -18,6 +18,7 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import ShareSwitchRow from './ShareSwitchRow';
 
 export interface GuestApprovalToggleProps {
   readonly boardId: string;
@@ -93,34 +94,19 @@ export default function GuestApprovalToggle({ boardId }: GuestApprovalToggleProp
   if (!ready || !isOwner) return null;
 
   return (
-    <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-[#dfdafb] bg-white px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-700">Approve guest posts first</p>
-        <p className="text-xs text-slate-500">New guest posts stay hidden from everyone else until you approve them.</p>
-        {pending > 0 ? (
-          <p data-guest-approval-pending-hint="true" className="mt-1 text-xs text-amber-700">
-            {pending} post{pending === 1 ? '' : 's'} already waiting stay pending until you approve or decline them.
-          </p>
-        ) : null}
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label="Approve guest posts first"
-        data-guest-approval-toggle="true"
-        disabled={saving}
-        onClick={() => void toggle()}
-        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-          enabled ? 'bg-[#655ac9]' : 'bg-slate-300'
-        }`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-            enabled ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
-      </button>
-    </div>
+    <ShareSwitchRow
+      label="Approve guest posts first"
+      hint="New guest posts stay hidden from everyone else until you approve them."
+      checked={enabled}
+      onToggle={() => void toggle()}
+      disabled={saving}
+      switchData={{ 'data-guest-approval-toggle': 'true' }}
+    >
+      {pending > 0 ? (
+        <p data-guest-approval-pending-hint="true" className="pb-2 text-xs text-amber-700">
+          {pending} post{pending === 1 ? '' : 's'} already waiting stay pending until you approve or decline them.
+        </p>
+      ) : null}
+    </ShareSwitchRow>
   );
 }

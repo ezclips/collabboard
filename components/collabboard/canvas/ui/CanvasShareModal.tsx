@@ -216,24 +216,14 @@ export default function CanvasShareModal({
         >
           <X className="h-3.5 w-3.5" />
         </button>
-        <div className="overflow-hidden rounded-2xl bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">Share canvas</h2>
-            <p className="mt-1 text-sm text-gray-500">Invite people directly to {canvasTitle}.</p>
-          </div>
+        <div data-share-modal="true" className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+          <h2 className="truncate text-lg font-semibold text-gray-900">Share “{canvasTitle}”</h2>
         </div>
 
-        <div className="space-y-5 px-6 py-6">
-          <div className="rounded-2xl bg-[#f6f5fd] p-4">
-            <p className="text-sm font-medium text-slate-700">Canvas access</p>
-            <p className="mt-1 text-sm text-slate-600">This share flow is restricted to the current canvas.</p>
-            <div className="mt-3 rounded-xl border border-[#dfdafb] bg-white px-3 py-2 text-sm text-slate-700">
-              {canvasTitle}
-            </div>
-            {/* PATCH-366. Self-sufficient: shows only to the board owner. */}
-            <BoardFreezeToggle boardId={canvasId} />
-          </div>
+        <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+          {/* PATCH-369. The Freeze board switch sits directly above the tab bar. */}
+          <BoardFreezeToggle boardId={canvasId} />
 
           <div className="flex gap-2 rounded-xl bg-slate-100 p-1">
             <button
@@ -429,36 +419,39 @@ export default function CanvasShareModal({
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-5">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-50"
-          >
-            {activeTab === 'link' && generatedLink ? 'Done' : activeTab === 'guests' ? 'Close' : 'Cancel'}
-          </button>
-          {activeTab === 'email' ? (
+        {/* PATCH-369. No footer on the Guest link / People tabs -- the X closes. */}
+        {activeTab === 'email' || activeTab === 'link' ? (
+          <div className="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
             <button
               type="button"
-              onClick={handleInviteUser}
-              disabled={invitingUser || !inviteEmails.trim() || !canManageShare}
-              className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:opacity-50"
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-50"
             >
-              {invitingUser ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Invite
+              {activeTab === 'link' && generatedLink ? 'Done' : 'Cancel'}
             </button>
-          ) : activeTab === 'link' && !generatedLink ? (
-            <button
-              type="button"
-              onClick={handleCreateInviteLink}
-              disabled={creatingLink || !canManageShare}
-              className="flex items-center gap-2 rounded-lg bg-[#8a2be2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#7a24cb] disabled:opacity-50"
-            >
-              {creatingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Create
-            </button>
-          ) : null}
-        </div>
+            {activeTab === 'email' ? (
+              <button
+                type="button"
+                onClick={handleInviteUser}
+                disabled={invitingUser || !inviteEmails.trim() || !canManageShare}
+                className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:opacity-50"
+              >
+                {invitingUser ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Invite
+              </button>
+            ) : activeTab === 'link' && !generatedLink ? (
+              <button
+                type="button"
+                onClick={handleCreateInviteLink}
+                disabled={creatingLink || !canManageShare}
+                className="flex items-center gap-2 rounded-lg bg-[#8a2be2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#7a24cb] disabled:opacity-50"
+              >
+                {creatingLink ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Create
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </div>
       </div>
     </div>

@@ -113,3 +113,31 @@ describe('PATCH-365 CanvasShareModal: the Guest link tab', () => {
     expect(exactButton('Create')).toBeNull();
   });
 });
+
+describe('PATCH-369 CanvasShareModal: compact frame', () => {
+  it('marks the panel, one-line header, and drops the Canvas access box', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));
+    await mount();
+    expect(host.querySelector('[data-share-modal="true"]')).not.toBeNull();
+    expect(host.textContent).not.toContain('Canvas access');
+    expect(host.textContent).not.toContain('Invite people directly to');
+    expect(host.textContent).toContain('Share “Board”');
+  });
+
+  it('keeps the footer on Email and Invite link, and hides it on Guest link and People', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [], people: [] })));
+    await mount();
+
+    // Email (default): footer present.
+    expect(exactButton('Cancel')).not.toBeNull();
+
+    await click(buttonWithText('Invite link'));
+    expect(exactButton('Cancel')).not.toBeNull();
+
+    await click(host.querySelector('[data-share-tab="guests"]') as HTMLElement);
+    expect(exactButton('Cancel')).toBeNull();
+
+    await click(buttonWithText('People'));
+    expect(exactButton('Cancel')).toBeNull();
+  });
+});

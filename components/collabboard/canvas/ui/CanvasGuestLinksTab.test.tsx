@@ -170,3 +170,40 @@ describe('PATCH-365 CanvasGuestLinksTab', () => {
     expect(q('[data-guest-link-error="true"]')?.textContent).toContain('Nope.');
   });
 });
+
+describe('PATCH-369 CanvasGuestLinksTab: compact form', () => {
+  it('keeps both selects and puts the checkbox and Create on one row', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));
+    await mount();
+
+    expect(q('[data-guest-link-permission="true"]')).not.toBeNull();
+    expect(q('[data-guest-link-expiry="true"]')).not.toBeNull();
+
+    const checkbox = q('[data-guest-link-password-toggle="true"]')!;
+    const create = q('[data-guest-link-create="true"]')!;
+    const row = checkbox.closest('div.flex');
+    expect(row).not.toBeNull();
+    expect(row!.contains(create)).toBe(true);
+  });
+
+  it('shows the password field only when the checkbox is checked', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));
+    await mount();
+    expect(q('[data-guest-link-password="true"]')).toBeNull();
+    await click(q('[data-guest-link-password-toggle="true"]'));
+    expect(q('[data-guest-link-password="true"]')).not.toBeNull();
+  });
+
+  it('shows the footnote only when there is at least one link', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));
+    await mount();
+    expect(q('[data-guest-links]')?.textContent).not.toContain('Turning a link off');
+
+    if (root) { const r = root; await act(async () => r.unmount()); root = null; }
+    host?.remove();
+
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [LINK] })));
+    await mount();
+    expect(q('[data-guest-links]')?.textContent).toContain('Turning a link off');
+  });
+});

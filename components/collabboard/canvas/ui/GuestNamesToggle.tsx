@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { supabaseBrowser } from '@/lib/supabase/browser';
+import ShareSwitchRow from './ShareSwitchRow';
 
 export interface GuestNamesToggleProps {
   readonly boardId: string;
@@ -78,31 +79,13 @@ export default function GuestNamesToggle({ boardId }: GuestNamesToggleProps) {
   if (!ready || !isOwner) return null;
 
   return (
-    <div className="mb-4 flex items-start justify-between gap-3 rounded-xl border border-[#dfdafb] bg-white px-3 py-2">
-      <div className="min-w-0">
-        <p className="text-sm font-medium text-slate-700">Hide guest names</p>
-        <p className="text-xs text-slate-500">
-          Guests appear as Guest 1–99 to everyone. You still see real names on the People tab.
-        </p>
-      </div>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={enabled}
-        aria-label="Hide guest names"
-        data-hide-guest-names-toggle="true"
-        disabled={saving}
-        onClick={() => void toggle()}
-        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-          enabled ? 'bg-[#655ac9]' : 'bg-slate-300'
-        }`}
-      >
-        <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
-            enabled ? 'translate-x-6' : 'translate-x-1'
-          }`}
-        />
-      </button>
-    </div>
+    <ShareSwitchRow
+      label="Hide guest names"
+      hint="Guests appear as Guest 1–99 to everyone. You still see real names on the People tab."
+      checked={enabled}
+      onToggle={() => void toggle()}
+      disabled={saving}
+      switchData={{ 'data-hide-guest-names-toggle': 'true' }}
+    />
   );
 }

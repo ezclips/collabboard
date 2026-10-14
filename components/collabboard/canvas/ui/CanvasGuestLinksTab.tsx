@@ -179,10 +179,11 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
 
   return (
     <div data-guest-links="true" className="space-y-4">
-      {/* PATCH-367. Self-sufficient: shows only to the board owner. */}
-      <GuestApprovalToggle boardId={canvasId} />
-      {/* PATCH-368. Under the approval toggle. */}
-      <GuestNamesToggle boardId={canvasId} />
+      {/* PATCH-369. The two owner switches share one bordered list with a divider. */}
+      <div className="divide-y divide-gray-100 rounded-xl border border-[#dfdafb] px-3">
+        <GuestApprovalToggle boardId={canvasId} />
+        <GuestNamesToggle boardId={canvasId} />
+      </div>
 
       {error ? (
         <p data-guest-link-error="true" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -213,44 +214,59 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
       ) : null}
 
       <div className="space-y-3 rounded-xl border border-gray-200 p-3">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">Permission</label>
-          <select
-            data-guest-link-permission="true"
-            value={permission}
-            onChange={(event) => setPermission(event.target.value as GuestLinkPermission)}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900"
-          >
-            <option value="view">Can view</option>
-            <option value="comment">Can comment</option>
-            <option value="edit">Can edit</option>
-          </select>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-700">Permission</label>
+            <select
+              data-guest-link-permission="true"
+              value={permission}
+              onChange={(event) => setPermission(event.target.value as GuestLinkPermission)}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900"
+            >
+              <option value="view">Can view</option>
+              <option value="comment">Can comment</option>
+              <option value="edit">Can edit</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-medium text-gray-700">Expiry</label>
+            <select
+              data-guest-link-expiry="true"
+              value={expiryIndex}
+              onChange={(event) => setExpiryIndex(Number(event.target.value))}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900"
+            >
+              {GUEST_LINK_EXPIRY_OPTIONS.map((option, index) => (
+                <option key={option.label} value={index}>{option.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div>
-          <label className="mb-1 block text-xs font-medium text-gray-700">Expiry</label>
-          <select
-            data-guest-link-expiry="true"
-            value={expiryIndex}
-            onChange={(event) => setExpiryIndex(Number(event.target.value))}
-            className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900"
-          >
-            {GUEST_LINK_EXPIRY_OPTIONS.map((option, index) => (
-              <option key={option.label} value={index}>{option.label}</option>
-            ))}
-          </select>
-        </div>
+        <div className="flex items-center justify-between gap-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+            <input
+              type="checkbox"
+              data-guest-link-password-toggle="true"
+              checked={passwordOn}
+              onChange={(event) => setPasswordOn(event.target.checked)}
+              className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
+            />
+            Require a password
+          </label>
 
-        <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
-          <input
-            type="checkbox"
-            data-guest-link-password-toggle="true"
-            checked={passwordOn}
-            onChange={(event) => setPasswordOn(event.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-[#655ac9] focus:ring-[#655ac9]"
-          />
-          Require a password
-        </label>
+          <button
+            type="button"
+            data-guest-link-create="true"
+            onClick={() => void create()}
+            disabled={creating}
+            className="flex shrink-0 items-center justify-center gap-2 rounded-lg bg-[#8a2be2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#7a24cb] disabled:opacity-50"
+          >
+            {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Create guest link
+          </button>
+        </div>
 
         {passwordOn ? (
           <input
@@ -263,17 +279,6 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
             className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900"
           />
         ) : null}
-
-        <button
-          type="button"
-          data-guest-link-create="true"
-          onClick={() => void create()}
-          disabled={creating}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#8a2be2] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#7a24cb] disabled:opacity-50"
-        >
-          {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Create guest link
-        </button>
       </div>
 
       {links.length === 0 ? (
@@ -355,9 +360,11 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
         </ul>
       )}
 
-      <p className="text-xs text-gray-500">
-        Turning a link off stops new people joining. Remove people who already joined on the People tab.
-      </p>
+      {links.length > 0 ? (
+        <p className="text-xs text-gray-500">
+          Turning a link off stops new people joining. Remove people who already joined on the People tab.
+        </p>
+      ) : null}
 
       {qrLink ? (
         <GuestLinkQrOverlay url={qrLink.url} title={canvasTitle} onClose={() => setQrLink(null)} />
