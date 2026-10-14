@@ -10,6 +10,10 @@ vi.mock('@/lib/supabase/browser', () => ({
   supabaseBrowser: () => ({ auth: { getSession: async () => ({ data: { session: null } }) } }),
 }));
 
+// PATCH-366. The freeze switch is self-sufficient and has its own test; stub it
+// here so this suite stays about the modal's tabs.
+vi.mock('./BoardFreezeToggle', () => ({ default: () => null }));
+
 import CanvasShareModal from './CanvasShareModal';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

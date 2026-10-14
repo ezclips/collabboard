@@ -6,6 +6,7 @@ import { loadKanbanData, loadKanbanScaffoldData, loadKanbanCardsForColumn, saveC
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { removeKanbanCardAttachments, removeKanbanCardAttachmentsForCards } from '@/lib/kanban/kanbanAttachmentStorage';
 import { loadBrainstormLinks, type BrainstormLink } from '@/lib/kanban/brainstormLinks';
+import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
 import type {
   KanbanState,
   KanbanAction,
@@ -837,6 +838,13 @@ interface KanbanContextValue {
   canvasId: string;
   /** PATCH-341. cardId -> the notes it was sent from (reverse lookup). */
   brainstormLinks: Map<string, BrainstormLink[]>;
+  /**
+   * PATCH-366 Addendum 2. `frozen_at` is set and this user is not a board admin,
+   * decided at RENDER time. `state.readonly` only learns this after the async
+   * (re)load resolves, which leaves a window where a background write slips
+   * through; this closes it.
+   */
+  frozenReadonly: boolean;
 }
 
 const KanbanContext = createContext<KanbanContextValue | undefined>(undefined);
@@ -862,6 +870,11 @@ export function KanbanProvider({
     },
   });
   const activeCardIdRef = useRef<string | null>(null);
+  // PATCH-366. A frozen board is read-only for everyone but the owner/admin.
+  const { frozenAt } = useBoardFrozen(canvasId);
+  // The current member's permission_level from the last load. Read at render
+  // time below so the frozen term is correct before the async reload resolves.
+  const memberPermissionRef = useRef<string | null>(null);
   // PATCH-341. The reverse "From brainstorm" lookup: one read per board load,
   // then on focus at most once per 60 s. Never part of `state.data`, so RESET
   // (realtime, refetch) never wipes it.
@@ -907,7 +920,8 @@ export function KanbanProvider({
         data: { user },
       } = await supabase.auth.getUser();
       const currentMember = fullData.members.find((m) => m.user_id === user?.id);
-      const isReadonly = currentMember?.permission_level === 'view';
+      memberPermissionRef.current = currentMember?.permission_level ?? null;
+      const isReadonly = currentMember?.permission_level === 'view' || (frozenAt != null && currentMember?.permission_level !== 'admin');
       const persistedSortBy = currentMember?.sort_by || null;
       const persistedSortOrder = currentMember?.sort_order === 'desc' ? 'desc' : 'asc';
       const persistedGroupBy =
@@ -950,7 +964,7 @@ export function KanbanProvider({
         void reconcileFromServer();
       }
     }
-  }, [canvasId, initialData?.users]);
+  }, [canvasId, initialData?.users, frozenAt]);
 
   const scheduleReconcileFromServer = useCallback(() => {
     if (realtimeReconcileTimerRef.current) {
@@ -972,7 +986,8 @@ export function KanbanProvider({
           data: { user },
         } = await supabase.auth.getUser();
         const currentMember = data.members.find((m) => m.user_id === user?.id);
-        const isReadonly = currentMember?.permission_level === 'view';
+        memberPermissionRef.current = currentMember?.permission_level ?? null;
+        const isReadonly = currentMember?.permission_level === 'view' || (frozenAt != null && currentMember?.permission_level !== 'admin');
         dispatch({ type: 'SET_READONLY', payload: isReadonly });
         const persistedSortBy = currentMember?.sort_by || null;
         const persistedSortOrder = currentMember?.sort_order === 'desc' ? 'desc' : 'asc';
@@ -1001,7 +1016,7 @@ export function KanbanProvider({
       }
     }
     init();
-  }, [canvasId]);
+  }, [canvasId, frozenAt]);
 
   // Realtime multi-user synchronization
   useEffect(() => {
@@ -1073,8 +1088,12 @@ export function KanbanProvider({
     };
   }, [canvasId, scheduleReconcileFromServer]);
 
+  // PATCH-366 Addendum 2. The frozen term, decided at render time. See the
+  // context field's comment: `state.readonly` lags the freeze by one async load.
+  const frozenReadonly = frozenAt != null && memberPermissionRef.current !== 'admin';
+
   return (
-    <KanbanContext.Provider value={{ state, dispatch, canvasId, brainstormLinks }}>
+    <KanbanContext.Provider value={{ state, dispatch, canvasId, brainstormLinks, frozenReadonly }}>
       {children}
     </KanbanContext.Provider>
   );
@@ -1118,12 +1137,12 @@ export function useKanbanHistory() {
 }
 
 export function useKanbanReadonly() {
-  const { state } = useKanban();
-  return state.readonly;
+  const { state, frozenReadonly } = useKanban();
+  return state.readonly || frozenReadonly;
 }
 
 export function useKanbanActions() {
-  const { dispatch, canvasId, state } = useKanban();
+  const { dispatch, canvasId, state, frozenReadonly } = useKanban();
 
   return {
     // Card actions
@@ -1309,13 +1328,14 @@ export function useKanbanActions() {
     ),
     canvasId,
     readonly: state.readonly,
+    frozenReadonly,
   };
 }
 
 // Wrapper for actions that need persistence
 export function useKanbanPersistence() {
   const actions = useKanbanActions();
-  const { canvasId, readonly } = actions as any;
+  const { canvasId, readonly, frozenReadonly } = actions as any;
   const data = useKanbanData();
 
   // Debounce guard so multiple concurrent conflicts don't spam refetches
@@ -1337,10 +1357,16 @@ export function useKanbanPersistence() {
 
   const handleConflict = useCallback(
     (entityLabel: string) => {
-      toast.error(`${entityLabel} was changed by another user. Board refreshed.`);
+      // PATCH-366 Addendum 2. A frozen board refuses the write, so a 0-row
+      // result is not a conflict with another user -- say what it really is.
+      if (frozenReadonly) {
+        toast.info('This board is frozen. Changes are not saved.');
+      } else {
+        toast.error(`${entityLabel} was changed by another user. Board refreshed.`);
+      }
       refetchAndReset();
     },
-    [refetchAndReset]
+    [refetchAndReset, frozenReadonly]
   );
 
   const getCurrentUserId = useCallback(async (): Promise<string | null> => {

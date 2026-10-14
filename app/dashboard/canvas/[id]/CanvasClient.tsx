@@ -125,6 +125,8 @@ import NotesAiDialog from '@/components/collabboard/NotesAiDialog';
 import { useNotesAi } from '@/components/collabboard/useNotesAi';
 import { useBoardPresence } from '@/components/collabboard/presence/useBoardPresence';
 import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceStack';
+import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
+import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -578,6 +580,13 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     insertPostOrThrow, insertPostPreservingFailureChannels, insertPostAndSelectOrThrow, createContainerOrThrow, dropDraftIntoContainerOrThrow, updatePostFieldsSwallowResolved, updatePostFieldsOrThrow, updatePostFieldsPreservingFailureChannels, deletePostSwallowResolved, deletePostOrThrow,
   } = useCanvasData({ canvasId, dispatch });
 
+  // PATCH-366. Freeze: the board row's frozen_at, live. The owner toggles it in
+  // the Share modal; a realtime update reaches every open tab (no reload).
+  const canvasFrozenAt = (canvas as { frozen_at?: string | null } | null)?.frozen_at ?? null;
+  const boardFreeze = useBoardFrozen(canvasId, canvasFrozenAt);
+  const boardIsFrozen = boardFreeze.frozenAt != null;
+  const canUnfreezeBoard = isBoardOwner(user?.id, canvasId, canvas);
+
   /**
    * May this user change the shared CONTENT of this board -- its padlets?
    *
@@ -600,6 +609,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     boardId: canvasId,
     board: canvas,
     collaboratorAuthority: boardCollaboratorAuthority,
+    frozen: boardIsFrozen,
   });
 
   /**
@@ -9566,6 +9576,12 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           status={boardPresence.status}
           myUserId={user?.id ?? ''}
         />
+        {/* PATCH-366. Freeze banner on Kanban too. */}
+        <FrozenBoardBanner
+          frozen={boardIsFrozen}
+          isOwnerOrAdmin={canUnfreezeBoard}
+          onUnfreeze={() => boardFreeze.setFrozen(false)}
+        />
       </>
     );
   }
@@ -9584,6 +9600,12 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           people={boardPresence.people}
           status={boardPresence.status}
           myUserId={user?.id ?? ''}
+        />
+        {/* PATCH-366. Freeze banner on Gantt too. */}
+        <FrozenBoardBanner
+          frozen={boardIsFrozen}
+          isOwnerOrAdmin={canUnfreezeBoard}
+          onUnfreeze={() => boardFreeze.setFrozen(false)}
         />
       </>
     );
@@ -11186,6 +11208,13 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               people={boardPresence.people}
               status={boardPresence.status}
               myUserId={user?.id ?? ''}
+            />
+
+            {/* PATCH-366. Freeze banner (all layouts). */}
+            <FrozenBoardBanner
+              frozen={boardIsFrozen}
+              isOwnerOrAdmin={canUnfreezeBoard}
+              onUnfreeze={() => boardFreeze.setFrozen(false)}
             />
 
             {isFreeformLayout && (

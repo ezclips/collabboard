@@ -248,3 +248,35 @@ describe('the account-switch transition, in order', () => {
     expect(step(B, authority(B, BOARD, 'editor'))).toBe(true);
   });
 });
+
+describe('PATCH-366 a frozen board is the owner’s alone', () => {
+  it('owner may edit a frozen board; an editor collaborator may not', () => {
+    const board = boardOwnedBy(A);
+    // Owner, frozen.
+    expect(canEditBoard({ userId: A, boardId: BOARD, board, collaboratorAuthority: null, frozen: true })).toBe(true);
+    // Editor collaborator, frozen: refused.
+    expect(canEditBoard({
+      userId: B, boardId: BOARD, board, collaboratorAuthority: authority(B, BOARD, 'editor'), frozen: true,
+    })).toBe(false);
+    // Editor collaborator, open: allowed (unchanged).
+    expect(canEditBoard({
+      userId: B, boardId: BOARD, board, collaboratorAuthority: authority(B, BOARD, 'editor'), frozen: false,
+    })).toBe(true);
+  });
+
+  it('an unresolved owner is refused while frozen (fail closed)', () => {
+    // The board row has not resolved for this user yet.
+    expect(canEditBoard({ userId: A, boardId: BOARD, board: null, collaboratorAuthority: null, frozen: true })).toBe(false);
+    // A board row for a DIFFERENT board does not count.
+    expect(canEditBoard({
+      userId: A, boardId: BOARD, board: boardOwnedBy(A, OTHER_BOARD), collaboratorAuthority: null, frozen: true,
+    })).toBe(false);
+  });
+
+  it('omitting frozen keeps the normal owner-or-editor rule', () => {
+    const board = boardOwnedBy(A);
+    expect(canEditBoard({
+      userId: B, boardId: BOARD, board, collaboratorAuthority: authority(B, BOARD, 'editor'),
+    })).toBe(true);
+  });
+});

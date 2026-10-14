@@ -110,6 +110,11 @@ export function canEditBoard(input: {
   readonly boardId: string | null | undefined;
   readonly board: BoardOwnershipRow | null | undefined;
   readonly collaboratorAuthority: BoardCollaboratorAuthority | null | undefined;
+  /**
+   * PATCH-366. When the board is FROZEN, only the owner may edit -- an editor
+   * collaborator may NOT. Omitted/false keeps the normal owner-or-editor rule.
+   */
+  readonly frozen?: boolean;
 }): boolean {
   // Authenticated FIRST, and unconditionally. Everything below is cached
   // client state that outlives a session: on logout or an account switch the
@@ -117,8 +122,13 @@ export function canEditBoard(input: {
   // answer are both still sitting in state.
   if (!isId(input.userId) || !isId(input.boardId)) return false;
 
+  const owner = isBoardOwner(input.userId, input.boardId, input.board);
+
+  // A frozen board is the owner's alone.
+  if (input.frozen === true) return owner;
+
   return (
-    isBoardOwner(input.userId, input.boardId, input.board) ||
+    owner ||
     isBoardEditorCollaborator(input.userId, input.boardId, input.collaboratorAuthority)
   );
 }

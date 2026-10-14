@@ -5,7 +5,7 @@
 // instead of the stale one (the Gantt path has no realtime echo).
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Card } from '@/types/kanban-canvas';
 
 const hoisted = vi.hoisted(() => ({
@@ -13,6 +13,9 @@ const hoisted = vi.hoisted(() => ({
   loadKanbanData: vi.fn(async () => null),
   loadKanbanScaffoldData: vi.fn(async () => null),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  // PATCH-366 Addendum 2. The board row `useBoardFrozen` reads on mount.
+  boardFrozenAt: null as string | null,
 }));
 
 vi.mock('@/lib/kanban/supabaseAdapter', () => ({
@@ -47,17 +50,30 @@ vi.mock('@/lib/supabase/browser', () => {
       channel: () => channel,
       removeChannel: () => {},
       auth: { getUser: async () => ({ data: { user: { id: 'u1' } } }) },
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({ data: { frozen_at: hoisted.boardFrozenAt }, error: null }),
+          }),
+        }),
+      }),
     }),
   };
 });
 vi.mock('sonner', () => ({
-  toast: { error: hoisted.toastError, success: vi.fn(), info: vi.fn() },
+  toast: { error: hoisted.toastError, success: vi.fn(), info: hoisted.toastInfo },
 }));
 
 import { KanbanProvider, useKanbanPersistence } from '@/components/kanban-canvas/store';
 
 (globalThis as unknown as { React?: typeof React }).React = React;
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+beforeEach(() => {
+  hoisted.boardFrozenAt = null;
+  hoisted.toastError.mockReset();
+  hoisted.toastInfo.mockReset();
+});
 
 let api: ReturnType<typeof useKanbanPersistence> | null = null;
 function Harness() {
@@ -130,5 +146,26 @@ describe('PATCH-320 Addendum 6: the store records the saved stamp', () => {
     });
 
     expect(hoisted.toastError).toHaveBeenCalled();
+  });
+
+  // PATCH-366 Addendum 2. A write the frozen board refuses is not a conflict.
+  it('a refused write on a frozen board says so, not "changed by another user"', async () => {
+    hoisted.boardFrozenAt = '2026-06-15T12:00:00Z';
+    hoisted.saveCard.mockResolvedValueOnce({
+      ok: false,
+      conflict: true,
+      message: 'Card was changed by another user.',
+    });
+
+    await mount();
+    // Let the freeze hook's own board read resolve.
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    await act(async () => {
+      await api!.updateCard('c1', { label: 'A' });
+    });
+
+    expect(hoisted.toastInfo).toHaveBeenCalledWith('This board is frozen. Changes are not saved.');
+    expect(hoisted.toastError).not.toHaveBeenCalled();
   });
 });
