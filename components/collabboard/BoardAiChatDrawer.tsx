@@ -40,6 +40,9 @@ import type {
 import type { BoardAiContextRequestItem } from '@/lib/domain/ai/boardAiChatContext';
 import KanbanMessageProposals from '@/components/kanban-canvas/KanbanMessageProposals';
 import PadletMessageProposals from '@/components/collabboard/PadletMessageProposals';
+import BoardAiActionChips, {
+  type BoardAiActionKeyHandler,
+} from '@/components/collabboard/BoardAiActionChips';
 import type { PadletApplyChangeResult, PadletProposedChange } from '@/lib/domain/ai/padletChangeProposals';
 import type { KanbanApplyChangeResult, KanbanProposedChange } from '@/lib/domain/ai/kanbanChangeProposals';
 
@@ -212,6 +215,12 @@ export interface BoardAiChatDrawerProps {
    * board -- the owner included -- and the proposals note has to say WHY.
    */
   readonly boardFrozen?: boolean;
+  /**
+   * PATCH-378. The board's layout, which is what gives the ready-made Padlet
+   * actions their noun. Absent on Freeform, Kanban and the PDF reader, and that
+   * absence is what hides the whole chip row and its `/` menu there.
+   */
+  readonly actionLayout?: string | null;
   /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
@@ -485,6 +494,7 @@ export default function BoardAiChatDrawer({
   onApplyPadletChanges,
   canApplyPadletChanges = false,
   boardFrozen = false,
+  actionLayout = null,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -741,6 +751,17 @@ export default function BoardAiChatDrawer({
     }
     setBoardDraft(action);
   }, [documentScopeId, setDocumentSessionValue]);
+
+  /**
+   * PATCH-378. The `/` action menu owns the Arrow/Enter/Escape keys WHILE IT IS
+   * OPEN, but the textarea is this drawer's -- so the chip row hands its handler
+   * over here and the composer calls it first. Null means "no menu open", and
+   * every key then behaves exactly as before.
+   */
+  const actionKeyHandlerRef = useRef<BoardAiActionKeyHandler | null>(null);
+  const handleActionKeyHandlerChange = useCallback((handler: BoardAiActionKeyHandler | null) => {
+    actionKeyHandlerRef.current = handler;
+  }, []);
 
   const setLoadingMessages = useCallback((action: React.SetStateAction<boolean>) => {
     if (documentScopeId) {
@@ -2374,6 +2395,18 @@ export default function BoardAiChatDrawer({
             : null}
         />
 
+        {/* PATCH-378. Ready-made actions, above the composer. `actionLayout` is
+            absent everywhere but the five Padlet layouts, and the row (and its
+            `/` menu) do not exist without it. */}
+        <BoardAiActionChips
+          actionLayout={actionLayout}
+          disabled={sending}
+          draft={draft}
+          onSend={(prompt) => { void send(prompt); }}
+          onInsert={setDraft}
+          onKeyHandlerChange={handleActionKeyHandlerChange}
+        />
+
         <div className="flex items-end gap-1.5">
           <textarea
             data-board-ai-chat-input="true"
@@ -2385,6 +2418,9 @@ export default function BoardAiChatDrawer({
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
+              // PATCH-378. The `/` action menu gets first refusal: while it is
+              // open, Enter chooses an action instead of sending the message.
+              if (actionKeyHandlerRef.current?.(event)) return;
               // Enter sends, Shift+Enter is a newline -- the composer
               // convention already used elsewhere in the app.
               if (event.key === 'Enter' && !event.shiftKey) {

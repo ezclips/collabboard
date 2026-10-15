@@ -12490,6 +12490,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                board reads as "not an editor" to the proposals list. Pass the real
                reason so its note says the board is frozen instead. */
             boardFrozen={boardIsFrozen}
+            /* PATCH-378. Ready-made Padlet actions, on the five layouts that
+               have them. Freeform and Kanban pass nothing, so the chip row and
+               its `/` menu do not exist there. */
+            actionLayout={isPadletBoardAiLayout ? canvas?.layout : null}
           />
         )}
 

@@ -99,6 +99,8 @@ interface MountOptions {
     changes: readonly KanbanProposedChange[],
   ) => Promise<readonly KanbanApplyChangeResult[]>;
   onOpenCitation?: (request: { cardId?: string }) => void;
+  /** PATCH-378. The host layout that gives the ready-made actions their noun. */
+  actionLayout?: string | null;
 }
 
 async function mount(options: MountOptions = {}) {
@@ -123,6 +125,7 @@ async function mount(options: MountOptions = {}) {
         onSaveAssistantAsCard={options.onSaveAssistantAsCard}
         onApplyKanbanChanges={options.onApplyKanbanChanges}
         onOpenCitation={options.onOpenCitation as never}
+        actionLayout={options.actionLayout ?? null}
       />
     );
   }
@@ -194,8 +197,52 @@ describe('PATCH-323 the Kanban overview rides on every turn as a fixed chip', ()
     await send();
     expect(posted[0].context).toEqual({
       items: [{ type: 'kanban-card', cardId: CARD }, { type: 'kanban-board' }],
-    });
   });
+});
+
+// ============================================================================
+// PATCH-378. The ready-made Padlet actions, from the drawer's side. This suite
+// is the drawer's own render harness, so it is where the HOST GATE belongs: the
+// chip row and its `/` menu exist only when the host names a layout, which is
+// what keeps them off Freeform, Kanban and the PDF reader.
+// ============================================================================
+describe('PATCH-378 the action chips come from the host layout', () => {
+  it('renders the chip row when the host names a layout', async () => {
+    await mount({ actionLayout: 'columns' });
+    expect(q('[data-board-ai-action-chips="true"]')).not.toBeNull();
+    expect(q('[data-board-ai-action="group-by-theme"]')).not.toBeNull();
+  });
+
+  it('renders no chip row and no `/` menu when the host names none', async () => {
+    await mount();
+    expect(q('[data-board-ai-actions="true"]')).toBeNull();
+    expect(q('[data-board-ai-action-chips="true"]')).toBeNull();
+    // A slash in the composer must not conjure one on Kanban / Freeform.
+    await type('/ne');
+    expect(q('[data-board-ai-action-menu="true"]')).toBeNull();
+  });
+
+  it('sends a chip through the SAME path the composer uses', async () => {
+    await mount({ actionLayout: 'columns' });
+    await click('[data-board-ai-action="summarize"]');
+    expect(posted).toHaveLength(1);
+    expect(posted[0].message).toContain('one per column');
+  });
+
+  it('opens the `/` menu in the real composer and inserts without sending', async () => {
+    await mount({ actionLayout: 'wall' });
+    await type('/ne');
+    expect(q('[data-board-ai-action-menu="true"]')).not.toBeNull();
+
+    await click('[data-board-ai-action-menu-item="next-steps"]');
+    expect(posted).toHaveLength(0);
+    // The prompt lands in the composer, in this board's own noun.
+    const composer = (q('[data-board-ai-chat-input="true"]') as HTMLTextAreaElement).value;
+    expect(composer).toContain('Next steps');
+    expect(composer).toContain('card');
+    expect(composer).not.toContain('column');
+  });
+});
 
   it('reserves the overview’s slot: a fourth attachment is refused out loud', async () => {
     const three = [1, 2, 3].map((n) => boardAiDraftFromPage(DOC, 'A2.pdf', n));
