@@ -1,29 +1,50 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogClose, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Columns3, Grid3X3, Layers3, Clock, Loader2, X } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { supabaseBrowser } from '@/lib/supabase/browser';
 import { canEditWorkspace, type WorkspaceRole } from '@/lib/workspace/context';
 import { toast } from 'sonner';
 import type { Canvas, LayoutType } from '@/types/collabboard';
 import WallpaperSelector from '@/components/collabboard/canvas/WallpaperSelector';
 import IconSelector from '@/components/collabboard/canvas/IconSelector';
+import BoardIconGlyph from '@/components/collabboard/BoardIconGlyph';
+import ShareSwitchRow from '@/components/collabboard/canvas/ui/ShareSwitchRow';
+import CanvasLayoutTiles from '@/components/collabboard/canvas/ui/CanvasLayoutTiles';
+import { canSwitchLayout } from '@/lib/domain/canvas/layoutSwitchFamilies';
 
-// Switching into any of these layouts only ever touches boards.layout — no other
-// layout requires migrating existing padlets/sections, so they're safe to offer here.
-// Kanban/Gantt/Scheduler/Map/Drawing/Freeform each depend on structures (kanban_columns,
-// map pins, etc.) that a blind layout swap would leave inconsistent, so they're excluded.
-const SWITCHABLE_LAYOUTS: { id: LayoutType; name: string; icon: React.ComponentType<{ size?: number }> }[] = [
-  { id: 'wall', name: 'Wall', icon: Layers3 },
-  { id: 'columns', name: 'Columns', icon: Columns3 },
-  { id: 'grid', name: 'Grid', icon: Grid3X3 },
-  { id: 'timeline', name: 'Timeline', icon: Clock },
-];
+/**
+ * PATCH-376. A readable name for a board icon. The window used to print the
+ * stored value verbatim, so a `lucide:layout` board read "lucide:layout".
+ */
+function iconDisplayName(icon: string): string | null {
+  if (icon.startsWith('lucide:')) {
+    const name = icon.slice('lucide:'.length).replace(/-/g, ' ').trim();
+    return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Icon';
+  }
+  if (icon.startsWith('http') || icon.startsWith('data:')) return 'Image';
+  return icon ? 'Emoji' : null;
+}
+
+/**
+ * PATCH-376. What the wallpaper swatch says -- a kind, never a raw value.
+ * `#f3f4f6` reads "Default" because it IS this window's fallback: a board that
+ * never chose a wallpaper is stored as exactly that value, so it is the only
+ * honest name for it (and the palette's `#ffffff` is the explicit white).
+ */
+function wallpaperLabel(type: string | null | undefined, value: string | null | undefined): string {
+  if (!type || !value) return 'Default';
+  if (type === 'image') return 'Image';
+  if (type === 'gradient') return 'Gradient';
+  const hex = value.toLowerCase();
+  if (hex === '#ffffff') return 'White';
+  if (hex === '#f3f4f6') return 'Default';
+  return 'Colour';
+}
 
 interface CanvasSettingsModalProps {
   isOpen: boolean;
@@ -82,8 +103,6 @@ export default function CanvasSettingsModal({
     setLayout(canvas.layout);
   }, [isOpen, canvas]);
 
-  const layoutIsSwitchable = SWITCHABLE_LAYOUTS.some((option) => option.id === canvas?.layout);
-
   const handleSave = async () => {
     if (!canEdit) {
       toast.error('You do not have permission to change canvas settings');
@@ -117,7 +136,9 @@ export default function CanvasSettingsModal({
         updated_at: new Date().toISOString(),
       };
 
-      if (layoutIsSwitchable && layout !== canvas?.layout) {
+      // Same family only, re-checked at the write: a cross-family layout would
+      // leave every post with nowhere to render (see the family helper).
+      if (layout !== canvas?.layout && canSwitchLayout(canvas?.layout, layout)) {
         updates.layout = layout;
       }
 
@@ -175,8 +196,11 @@ export default function CanvasSettingsModal({
           freeze that nested (non-Radix, portaled-to-body) picker underneath. */}
       <Dialog open={isOpen} onOpenChange={onClose} modal={false}>
         <DialogContent
-          className="z-[4100] sm:max-w-xl"
+          className="z-[4100] gap-0 border-0 bg-transparent p-0 shadow-none sm:max-w-xl"
           showCloseButton={false}
+          /* The window has a visible title but no description, and Radix warns
+             when neither is declared. */
+          aria-describedby={undefined}
           onPointerDownOutside={(event) => {
             // Only block the outside-click-closes-me default while a nested
             // picker (Wallpaper's Google/OneDrive import, Icon selector) is
@@ -193,162 +217,152 @@ export default function CanvasSettingsModal({
             <X className="h-3.5 w-3.5" />
             <span className="sr-only">Close</span>
           </DialogClose>
-          <div className="max-h-[85vh] overflow-y-auto space-y-4">
-          <DialogHeader>
-            <DialogTitle>Canvas settings</DialogTitle>
-          </DialogHeader>
 
-          {!canEdit ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              You do not have permission to change canvas settings.
+          {/* PATCH-376. The Share window's shape (PATCH-369): a one-line header,
+              one scrolling body, a footer -- so the window fits the screen
+              instead of growing past it. */}
+          <div
+            data-canvas-settings-modal="true"
+            className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <DialogTitle className="truncate text-lg font-semibold text-gray-900">Canvas settings</DialogTitle>
             </div>
-          ) : null}
 
-          <div className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="canvas-settings-title">Title</Label>
-              <div className="flex items-center gap-3">
+            <div className="flex-1 space-y-5 overflow-y-auto px-6 py-4">
+              {!canEdit ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  You do not have permission to change canvas settings.
+                </div>
+              ) : null}
+
+              <div className="space-y-2">
+                <Label htmlFor="canvas-settings-title">Title</Label>
                 <Input
                   id="canvas-settings-title"
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                   placeholder="Canvas title"
                   disabled={!canEdit}
-                  className="h-8 flex-1 text-sm focus-visible:border-input focus-visible:ring-0"
-                />
-                <Switch
-                  aria-label="Show title in banner"
-                  checked={showTitleInBanner}
-                  onCheckedChange={setShowTitleInBanner}
-                  disabled={!canEdit}
-                  className="flex-shrink-0 data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                  className="h-8 text-sm focus-visible:border-input focus-visible:ring-0"
                 />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="canvas-settings-description">Description</Label>
-              <div className="flex items-center gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="canvas-settings-description">Description</Label>
                 <Input
                   id="canvas-settings-description"
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                   placeholder="Optional description"
                   disabled={!canEdit}
-                  className="h-8 flex-1 text-sm"
-                />
-                <Switch
-                  aria-label="Show description in banner"
-                  checked={showDescriptionInBanner}
-                  onCheckedChange={setShowDescriptionInBanner}
-                  disabled={!canEdit}
-                  className="flex-shrink-0 data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                  className="h-8 text-sm"
                 />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label>Icon</Label>
-              <div className="flex items-center gap-3">
+              <div className="space-y-2">
+                <Label>Icon</Label>
                 <Button
                   type="button"
                   variant="outline"
+                  data-settings-icon-preview="true"
                   onClick={() => setIconDialogOpen(true)}
                   disabled={!canEdit}
-                  className="h-8 min-w-0 flex-1 justify-start gap-2 text-sm"
+                  className="h-8 w-full min-w-0 justify-start gap-2 text-sm"
                 >
-                  {thumbnail.startsWith('http') ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumbnail} alt="" className="h-5 w-5 flex-shrink-0 rounded object-cover" />
-                  ) : (
-                    <span className="flex-shrink-0">{thumbnail}</span>
-                  )}
-                  <span className="truncate">Select icon</span>
+                  <BoardIconGlyph
+                    icon={thumbnail}
+                    className="h-5 w-5 shrink-0"
+                    imageClassName="h-5 w-5 shrink-0 rounded object-cover"
+                  />
+                  <span className="truncate">{iconDisplayName(thumbnail) ?? 'Select icon'}</span>
                 </Button>
-                <Switch
-                  aria-label="Show icon in banner"
-                  checked={showIconInBanner}
-                  onCheckedChange={setShowIconInBanner}
+              </div>
+
+              {/* PATCH-376. These three switches had no visible label at all --
+                  only an aria-label -- so nobody could tell what they did. Each
+                  row now says it, and keeps a meaningful accessible name. */}
+              <div className="space-y-1">
+                <ShareSwitchRow
+                  label="Show title in the board header"
+                  hint="Draw the title above the canvas"
+                  checked={showTitleInBanner}
+                  onToggle={() => setShowTitleInBanner((value) => !value)}
                   disabled={!canEdit}
-                  className="flex-shrink-0 data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
+                  switchData={{ 'data-settings-show-in-header': 'title' }}
+                />
+                <ShareSwitchRow
+                  label="Show description in the board header"
+                  hint="Draw the description under the title"
+                  checked={showDescriptionInBanner}
+                  onToggle={() => setShowDescriptionInBanner((value) => !value)}
+                  disabled={!canEdit}
+                  switchData={{ 'data-settings-show-in-header': 'description' }}
+                />
+                <ShareSwitchRow
+                  label="Show icon in the board header"
+                  hint="Draw the board's icon beside the title"
+                  checked={showIconInBanner}
+                  onToggle={() => setShowIconInBanner((value) => !value)}
+                  disabled={!canEdit}
+                  switchData={{ 'data-settings-show-in-header': 'icon' }}
                 />
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label>Wallpaper</Label>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setWallpaperDialogOpen(true)}
-                disabled={!canEdit}
-                className="w-full justify-between h-12"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded border" style={getWallpaperPreviewStyle()} />
-                  <span>Current wallpaper</span>
-                </div>
-              </Button>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Layout</Label>
-              {layoutIsSwitchable ? (
-                <div className="grid grid-cols-4 gap-2">
-                  {SWITCHABLE_LAYOUTS.map((option) => {
-                    const IconComponent = option.icon;
-                    const isSelected = layout === option.id;
-                    return (
-                      <button
-                        key={option.id}
-                        type="button"
-                        disabled={!canEdit}
-                        onClick={() => setLayout(option.id)}
-                        className={`flex flex-col items-center gap-1 rounded-lg border-2 px-2 py-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                          isSelected ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                        }`}
-                      >
-                        <IconComponent size={18} />
-                        {option.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500">
-                  Layout switching isn&apos;t available for this canvas type.
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <Label>Comments</Label>
-                <p className="text-xs text-gray-500">Allow users to comment on posts</p>
+              <div className="space-y-2">
+                <Label>Wallpaper</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-settings-wallpaper-preview="true"
+                  onClick={() => setWallpaperDialogOpen(true)}
+                  disabled={!canEdit}
+                  className="flex h-12 w-full items-center justify-between"
+                >
+                  <span className="flex items-center gap-3">
+                    <span className="h-8 w-8 rounded border" style={getWallpaperPreviewStyle()} />
+                    <span className="text-sm">{wallpaperLabel(wallpaper.type, wallpaper.value)}</span>
+                  </span>
+                </Button>
               </div>
-              <Switch
+
+              <div className="space-y-2">
+                <Label>Layout</Label>
+                <CanvasLayoutTiles
+                  currentLayout={canvas?.layout}
+                  selectedLayout={layout}
+                  canEdit={canEdit}
+                  onSelect={setLayout}
+                />
+              </div>
+
+              <ShareSwitchRow
+                label="Comments"
+                hint="Allow users to comment on posts"
                 checked={commentsEnabled}
-                onCheckedChange={setCommentsEnabled}
+                onToggle={() => setCommentsEnabled((value) => !value)}
                 disabled={!canEdit}
-                className="data-[state=checked]:bg-green-500 data-[state=unchecked]:bg-gray-300"
               />
             </div>
-          </div>
 
-          <div className="flex justify-end gap-2 pt-4">
-            <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={handleSave}
-              disabled={!canEdit || saving}
-              className="border-2 border-gray-900"
-            >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Save changes
-            </Button>
-          </div>
+            <div className="flex items-center justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-3">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-purple-600 transition-colors hover:bg-purple-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={!canEdit || saving}
+                className="flex items-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-purple-700 disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Save changes
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
