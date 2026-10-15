@@ -23,6 +23,17 @@ import {
   readKanbanBoardPlanData,
   type BoardAiKanbanSupabaseClient,
 } from '@/lib/server/ai/boardAiKanbanContext';
+// PATCH-372. The Padlet-style proposals: the same shape of flow as Kanban, but
+// the model proposes posts and panels, resolved against this turn's overview.
+import {
+  parsePadletChangeBlock,
+  resolvePadletChanges,
+  type PadletProposedChange,
+} from '@/lib/domain/ai/padletChangeProposals';
+import {
+  readPadletBoardPanels,
+  type BoardAiPadletBoardSupabaseClient,
+} from '@/lib/server/ai/boardAiPadletBoardContext';
 import { createBoardAiThreadRepository } from '@/lib/infra/ai/boardAiThreadRepository';
 import type { BoardAiChatSupabaseClient } from '@/lib/infra/ai/boardAiThreadRepository';
 import {
@@ -545,13 +556,21 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     // a browser: what the user sees is the prose the model wrote. On any other
     // surface the raw text passes through untouched.
     const isKanbanTurn = modelContext.some((block) => block.type === 'kanban-board');
-    const changeBlock = isKanbanTurn
+    // PATCH-372. A Padlet-style turn is one that carries the `padlet-board`
+    // overview; a turn is one or the other, never both. The SAME rules apply:
+    // the block is read only then, stripped wherever it sits, and never reaches
+    // storage or a browser.
+    const isPadletTurn = !isKanbanTurn && modelContext.some((block) => block.type === 'padlet-board');
+    const kanbanChangeBlock = isKanbanTurn
       ? parseKanbanChangeBlock(result.text)
-      : { prose: result.text, raw: null as null };
+      : { prose: result.text, raw: null as readonly never[] | null };
+    const padletChangeBlock = isPadletTurn
+      ? parsePadletChangeBlock(result.text)
+      : { prose: result.text, raw: null as readonly never[] | null };
 
     // The machine footer is read here and nowhere else, and it never reaches
     // storage or a browser: what the user sees is the prose the model wrote.
-    const answer = parseBoardAiCitationFooter(changeBlock.prose);
+    const answer = parseBoardAiCitationFooter(isPadletTurn ? padletChangeBlock.prose : kanbanChangeBlock.prose);
     const text = answer.content;
     if (!text) {
       return NextResponse.json(
@@ -577,13 +596,13 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      * stays and the proposal list does not, which the UI says.
      */
     let proposedChanges: readonly KanbanProposedChange[] = [];
-    if (isKanbanTurn && changeBlock.raw) {
+    if (isKanbanTurn && kanbanChangeBlock.raw) {
       const overview = modelContext.find((block) => block.type === 'kanban-board');
       const columnsAndRows = await readKanbanBoardColumnsAndRows(
         sessionClient as unknown as BoardAiKanbanSupabaseClient,
         boardId,
       );
-      proposedChanges = resolveKanbanChanges(changeBlock.raw, {
+      proposedChanges = resolveKanbanChanges(kanbanChangeBlock.raw, {
         passages: overview?.passages ?? [],
         columns: columnsAndRows.ok ? columnsAndRows.value.columns : [],
         rows: columnsAndRows.ok ? columnsAndRows.value.rows : [],
@@ -612,6 +631,27 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           ));
         }
       }
+    }
+
+    /**
+     * PATCH-372. The Padlet-style proposals. The model named sub-tokens and
+     * panel names, never ids; a token resolves only against THIS turn's overview
+     * passages, and a name against the board's own panels read through the
+     * caller's client (or a `create-panel` earlier in the block). An unknown
+     * token or name drops that change. Not persisted, exactly like Kanban's.
+     */
+    let proposedPadletChanges: readonly PadletProposedChange[] = [];
+    if (isPadletTurn && padletChangeBlock.raw) {
+      const overview = modelContext.find((block) => block.type === 'padlet-board');
+      const boardPanels = await readPadletBoardPanels(
+        sessionClient as unknown as BoardAiPadletBoardSupabaseClient,
+        boardId,
+      );
+      proposedPadletChanges = resolvePadletChanges(padletChangeBlock.raw, {
+        passages: overview?.passages ?? [],
+        panels: boardPanels.ok ? boardPanels.value.panels : [],
+        layout: boardPanels.ok ? boardPanels.value.layout : '',
+      });
     }
 
     /**
@@ -686,6 +726,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         // PATCH-350. Omitted entirely when the answer proposed nothing, so a
         // non-Kanban turn's message is byte-identical to before.
         ...(proposedChanges.length > 0 ? { proposedChanges } : {}),
+        // PATCH-372. The Padlet-style proposals, in their OWN field so a Kanban
+        // turn's message stays byte-identical. Omitted when the answer proposed
+        // nothing.
+        ...(proposedPadletChanges.length > 0 ? { proposedPadletChanges } : {}),
       },
     });
   } catch {

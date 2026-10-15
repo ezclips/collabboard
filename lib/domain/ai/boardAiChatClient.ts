@@ -16,6 +16,7 @@ import { BOARD_AI_MESSAGE_ROLES, type BoardAiMessageRole } from './boardAiChat';
 import type { BoardAiCitationEnvelope } from './boardAiChatCitation';
 import type { BoardAiContextView } from './boardAiChatContext';
 import type { KanbanProposedChange } from './kanbanChangeProposals';
+import type { PadletProposedChange } from './padletChangeProposals';
 
 /** Re-exported so a client bounds its composer by the SAME number the route enforces. */
 export const BOARD_AI_CHAT_MESSAGE_MAX = 4000;
@@ -70,4 +71,14 @@ export interface BoardAiChatMessageView {
    * is shown in amber and unticked by default.
    */
   readonly proposedChanges?: readonly KanbanProposedChange[] | null;
+  /**
+   * PATCH-372. Post/panel changes this answer proposed on a Padlet-style turn
+   * (Wall, Columns, Grid, Timeline), or absent/null when it proposed none.
+   *
+   * A SEPARATE field from `proposedChanges`, deliberately: the two unions share
+   * the `create`/`update`/`move` kinds, so no natural discriminant exists, and a
+   * separate field keeps a Kanban turn's message byte-identical. Present only in
+   * the POST response that generated it -- the proposals are not persisted.
+   */
+  readonly proposedPadletChanges?: readonly PadletProposedChange[] | null;
 }

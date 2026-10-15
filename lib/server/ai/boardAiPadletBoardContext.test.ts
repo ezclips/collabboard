@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   PADLET_BOARD_LAYOUTS,
   readPadletBoardBlock,
+  readPadletBoardPanels,
   type BoardAiPadletBoardSupabaseClient,
 } from './boardAiPadletBoardContext';
 import {
@@ -241,6 +242,42 @@ describe('PATCH-371 readPadletBoardBlock', () => {
     const text = result.ok ? result.value?.text ?? '' : '';
     expect(text).toMatch(/\(\d+ more posts not shown\)$/);
     expect(text.length).toBeLessThanOrEqual(6000);
+  });
+});
+
+describe('PATCH-372 readPadletBoardPanels', () => {
+  it('reads sections for Columns with NUMERIC ids as strings', async () => {
+    const { client } = fakeClient({
+      boards: [{ id: BOARD, layout: 'columns' }],
+      board_sections: [
+        { id: 197, title: 'Ideas', position: 0, board_id: BOARD },
+        { id: 198, title: 'Done', position: 1, board_id: BOARD },
+      ],
+    });
+    const result = await readPadletBoardPanels(client, BOARD);
+    expect(result.ok && result.value.layout).toBe('columns');
+    expect(result.ok && result.value.panels).toEqual([
+      { id: '197', name: 'Ideas', kind: 'section', order: 0 },
+      { id: '198', name: 'Done', kind: 'section', order: 1 },
+    ]);
+  });
+
+  it('reads root containers for Wall, and nothing for Map', async () => {
+    const wall = fakeClient({
+      boards: [{ id: BOARD, layout: 'wall' }],
+      padlets: [
+        container('w1', 'Anna', [], { wallPosition: 0 }),
+        container('w2', 'Bo', [], { wallPosition: 1 }),
+        note('p1', 'Child', { parentId: 'w1' }),
+      ],
+    });
+    const wallResult = await readPadletBoardPanels(wall.client, BOARD);
+    expect(wallResult.ok && wallResult.value.panels.map((panel) => panel.name)).toEqual(['Anna', 'Bo']);
+    expect(wallResult.ok && wallResult.value.panels.every((panel) => panel.kind === 'container')).toBe(true);
+
+    const map = fakeClient({ boards: [{ id: BOARD, layout: 'map' }] });
+    const mapResult = await readPadletBoardPanels(map.client, BOARD);
+    expect(mapResult.ok && mapResult.value.panels).toEqual([]);
   });
 });
 

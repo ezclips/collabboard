@@ -39,6 +39,8 @@ import type {
 } from '@/lib/domain/ai/boardAiChatClient';
 import type { BoardAiContextRequestItem } from '@/lib/domain/ai/boardAiChatContext';
 import KanbanMessageProposals from '@/components/kanban-canvas/KanbanMessageProposals';
+import PadletMessageProposals from '@/components/collabboard/PadletMessageProposals';
+import type { PadletApplyChangeResult, PadletProposedChange } from '@/lib/domain/ai/padletChangeProposals';
 import type { KanbanApplyChangeResult, KanbanProposedChange } from '@/lib/domain/ai/kanbanChangeProposals';
 
 /**
@@ -195,6 +197,15 @@ export interface BoardAiChatDrawerProps {
   readonly onApplyKanbanChanges?: (
     changes: readonly KanbanProposedChange[],
   ) => Promise<readonly KanbanApplyChangeResult[]>;
+  /**
+   * PATCH-372. Apply user-approved post/panel changes on a Padlet-style board.
+   * Absent for a viewer. Whether the list is APPLICABLE is `canApplyPadletChanges`.
+   */
+  readonly onApplyPadletChanges?: (
+    changes: readonly PadletProposedChange[],
+  ) => Promise<readonly PadletApplyChangeResult[]>;
+  /** PATCH-372. The board's edit authority; false renders the list read-only. */
+  readonly canApplyPadletChanges?: boolean;
   /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
@@ -465,6 +476,8 @@ export default function BoardAiChatDrawer({
   canSaveAssistantAsCard = false,
   onSaveAssistantAsCard,
   onApplyKanbanChanges,
+  onApplyPadletChanges,
+  canApplyPadletChanges = false,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -1986,6 +1999,7 @@ export default function BoardAiChatDrawer({
                 </div>
               ) : null}
               <KanbanMessageProposals message={message} canEdit={canSaveAssistantAsCard} onApply={onApplyKanbanChanges} />
+              <PadletMessageProposals message={message} canEdit={canApplyPadletChanges} onApply={onApplyPadletChanges} />
               {canShowSaveAnswer ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
                   <button

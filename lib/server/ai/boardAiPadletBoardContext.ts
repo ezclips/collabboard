@@ -19,6 +19,7 @@ import {
   type BoardAiCitablePassage,
   type ResolvedBoardAiContextBlock,
 } from '../../domain/ai/boardAiChatContext';
+import { padletPanelKindForLayout, type PadletPanelKind } from '../../domain/ai/padletChangeProposals';
 
 /** The layouts this overview exists for. Any other layout resolves to nothing. */
 export const PADLET_BOARD_LAYOUTS: readonly string[] = ['wall', 'columns', 'grid', 'timeline', 'map'];
@@ -353,5 +354,81 @@ export async function readPadletBoardBlock(
     label: boardAiContextLabel(boardTitle),
     ...(passages.length > 0 ? { passages } : {}),
     text: bounded(body),
+  });
+}
+
+/** One panel the board has, for resolving a proposed change's panel name. */
+export interface PadletBoardPanel {
+  readonly id: string;
+  readonly name: string;
+  readonly kind: PadletPanelKind;
+  readonly order: number;
+}
+
+/** The board's panels and its layout, for resolving a proposed change. */
+export interface PadletBoardPanels {
+  readonly layout: string;
+  readonly panels: readonly PadletBoardPanel[];
+}
+
+/**
+ * PATCH-372. The board's panels -- sections (Columns/Grid) or root containers
+ * (Wall/Timeline) -- with ids, names and order. Read with the caller's client,
+ * scoped to this board. A Map (or any other) layout has none.
+ */
+export async function readPadletBoardPanels(
+  client: BoardAiPadletBoardSupabaseClient,
+  boardId: string,
+): Promise<Result<PadletBoardPanels, DomainError>> {
+  const { data: board, error: boardError } = await client
+    .from('boards')
+    .select('id, layout')
+    .eq('id', boardId)
+    .maybeSingle();
+  if (boardError) return err(domainError('unavailable', 'Could not read the board'));
+  if (!board) return ok({ layout: '', panels: [] });
+  const layout = text(board.layout);
+  const kind = padletPanelKindForLayout(layout);
+  if (!kind) return ok({ layout, panels: [] });
+
+  if (kind === 'section') {
+    const { data: rows, error } = await client
+      .from('board_sections')
+      .select('id, title, position')
+      .eq('board_id', boardId)
+      .order('position', { ascending: true });
+    if (error) return err(domainError('unavailable', 'Could not read the board sections'));
+    return ok({
+      layout,
+      panels: (rows ?? [])
+        .map((row, index) => ({
+          id: idText(row.id),
+          name: text(row.title) || 'Section',
+          kind,
+          order: numberOf(row.position) ?? index,
+        }))
+        .filter((panel) => panel.id.length > 0),
+    });
+  }
+
+  const { data: rows, error } = await client
+    .from('padlets')
+    .select('id, type, title, content, metadata, location_label, location_lat, location_lng')
+    .eq('board_id', boardId);
+  if (error) return err(domainError('unavailable', 'Could not read the board posts'));
+  const orderKey = layout === 'timeline' ? 'position_in_timeline' : 'wallPosition';
+  return ok({
+    layout,
+    panels: (rows ?? [])
+      .map(toRow)
+      .filter((post) => post.type === 'container' && !text(post.metadata.parentId))
+      .sort((a, b) => (numberOf(a.metadata[orderKey]) ?? Number.MAX_SAFE_INTEGER) - (numberOf(b.metadata[orderKey]) ?? Number.MAX_SAFE_INTEGER))
+      .map((post, index) => ({
+        id: post.id,
+        name: postLabel(post),
+        kind,
+        order: numberOf(post.metadata[orderKey]) ?? index,
+      }))
+      .filter((panel) => panel.id.length > 0),
   });
 }

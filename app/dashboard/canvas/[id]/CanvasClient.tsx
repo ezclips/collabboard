@@ -89,6 +89,8 @@ import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
 import { attachPostToContainer, cleanupGraphEdgesForContainerChild } from '@/components/collabboard/canvas/hooks/attachPostToContainer';
 import { cleanupGraphEdgesForDeletedPosts } from '@/components/collabboard/canvas/hooks/deletePostGraphCleanup';
 import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository';
+import type { PadletApplyChangeResult, PadletProposedChange } from '@/lib/domain/ai/padletChangeProposals';
+import { executePadletApplyPlan, planPadletApply } from '@/lib/domain/ai/padletApplyPlan';
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
 import { createStorageGateway } from '@/lib/infra/supabase/storage';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
@@ -7021,6 +7023,93 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     }
   }, [padlets, supabase, fetchData]);
 
+  /**
+   * PATCH-372. Apply user-approved Padlet-style proposals, IN ORDER. The plan
+   * (positions, sibling lists, childPadletIds) comes from `planPadletApply`,
+   * which works on a batch-local copy of the board so each change sees the ones
+   * before it. Each write then goes through the SAME client path a manual edit
+   * uses -- see `executeWrite` below. A failure STOPS the batch; the UI reports
+   * which changes were applied.
+   */
+  const applyPadletProposedChanges = useCallback(async (
+    changes: readonly PadletProposedChange[],
+  ): Promise<readonly PadletApplyChangeResult[]> => {
+    if (!canvasId) return changes.map(() => ({ ok: false, message: 'Could not apply this change' }));
+    const nowIso = new Date().toISOString();
+
+    // PATCH-372 Addendum 1. The ORDERED DB writes, computed from a batch-local
+    // working copy of the board -- never from this render's `padlets`/`sections`,
+    // which is exactly what made earlier changes invisible to later ones (three
+    // posts into one container all wrote the same childPadletIds; eight moves
+    // into one column all landed on the same sectionPosition).
+    const plan = planPadletApply(changes, padlets, sections, {
+      boardId: canvasId,
+      layout: canvas?.layout ?? '',
+      now: nowIso,
+      newId: () => crypto.randomUUID(),
+    });
+
+    /**
+     * Each write goes through the SAME client path a manual edit uses:
+     *   - insert-section  -> createCreateSectionCommand (handleAddSection's own
+     *     command), and its DB-assigned id is returned so the executor can
+     *     rewrite later writes' placeholder `sectionId` (Addendum 2);
+     *   - insert-post     -> insertPostOrThrow (the board's one insert);
+     *   - update-fields   -> updatePostFieldsOrThrow;
+     *   - update-metadata -> updatePostFieldsOrThrow with { metadata, updated_at }
+     *     (the shape the container attach/detach and the section reorder write).
+     * A child attach also clears the post's Graph edges, as attachPostToContainer
+     * does.
+     */
+    return executePadletApplyPlan(plan, {
+      insertSection: async ({ title, position }) => {
+        const createSection = createCreateSectionCommand(createSectionsRepository());
+        const result = await createSection({ boardId: canvasId, title, position }, { userId: null });
+        if (!result.ok) throw result.error.cause ?? result.error;
+        const data = result.value as BoardSection | null;
+        if (!data) throw new Error('Could not create the column');
+        setSections((prev) => [...prev, data].sort((a, b) => a.position - b.position));
+        return String(data.id);
+      },
+      insertPost: async (row) => {
+        setPadlets((prev) => [...prev, row as any]);
+        await insertPostOrThrow(row);
+      },
+      updateFields: async (postId, fields) => {
+        markPadletLocallyModified(postId);
+        await updatePostFieldsOrThrow(postId, fields);
+        setPadlets((prev) => prev.map((p) => (p.id === postId ? { ...p, ...fields } : p)));
+      },
+      updateMetadata: async (postId, metadata) => {
+        markPadletLocallyModified(postId);
+        await updatePostFieldsOrThrow(postId, { metadata, updated_at: nowIso });
+        setPadlets((prev) => prev.map((p) => (p.id === postId ? { ...p, metadata } : p)));
+        if (typeof metadata.parentId === 'string' && metadata.sectionId === undefined) {
+          await cleanupGraphEdgesForContainerChild(canvasId, postId);
+          setGraphRefreshToken((token) => token + 1);
+        }
+      },
+      onFailure: (error) => {
+        console.error('Failed to apply a proposed change:', error);
+        // Converge the optimistic local state on the server's truth, as the
+        // manual paths do on failure.
+        fetchData();
+      },
+    });
+  }, [
+    canvasId,
+    canvas?.layout,
+    sections,
+    padlets,
+    setSections,
+    setPadlets,
+    insertPostOrThrow,
+    updatePostFieldsOrThrow,
+    markPadletLocallyModified,
+    setGraphRefreshToken,
+    fetchData,
+  ]);
+
   const handleDeleteChildFromContainer = useCallback(async (childId: string, containerId: string) => {
     const container = padlets.find(p => p.id === containerId);
     if (!container) return;
@@ -12243,6 +12332,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                the whole-board overview, and a cited post scrolls into view. */
             autoContextRequests={isPadletBoardAiLayout ? PADLET_BOARD_AI_AUTO_CONTEXT : undefined}
             onOpenPostCitation={isPadletBoardAiLayout ? scrollToPostCard : undefined}
+            /* PATCH-372. The Padlet-style proposals' apply, gated by the board's
+               edit authority -- a frozen board or a viewer gets no Apply. */
+            onApplyPadletChanges={isPadletBoardAiLayout && canEditBoardContent ? applyPadletProposedChanges : undefined}
+            canApplyPadletChanges={isPadletBoardAiLayout && canEditBoardContent}
           />
         )}
 

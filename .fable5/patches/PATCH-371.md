@@ -1,6 +1,6 @@
 # PATCH-371 — Board AI on Wall, Columns, Grid, Timeline and Map
 
-**Status:** approved
+**Status:** done
 
 ## Goal
 Board AI works on the Padlet-style layouts like it does on Kanban: a Board AI button in

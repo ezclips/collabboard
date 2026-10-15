@@ -54,6 +54,12 @@ type Row = Record<string, unknown>;
 let route: typeof import('../../../app/api/boards/[id]/ai/chat/route');
 let touchedTables: string[];
 
+/** PATCH-372. The board's layout, so one harness serves the Kanban and Padlet
+ *  route tests. The default keeps every Kanban test exactly as it was. */
+let boardLayout = 'kanban';
+const SECTION_ID = 197;
+const POST_A = 'f0111111-1111-4111-8111-111111111111';
+
 /**
  * The CALLER'S client, standing in for the authenticated session. Its `from`
  * serves the kanban tables directly, which is what makes "the reads go through
@@ -61,7 +67,17 @@ let touchedTables: string[];
  */
 function sessionClient() {
   const tables: Record<string, Row[]> = {
-    boards: [{ id: BOARD_ID, layout: 'kanban' }],
+    boards: [{ id: BOARD_ID, layout: boardLayout, title: 'Board' }],
+    // PATCH-372. `board_sections.id` is a BIGINT live, and posts store
+    // `metadata.sectionId` as a STRING -- the live shape.
+    board_sections: [{ id: SECTION_ID, title: 'Ideas', position: 0, board_id: BOARD_ID }],
+    padlets: [
+      {
+        id: POST_A, board_id: BOARD_ID, type: 'text', title: '',
+        content: '<p>First idea</p>', metadata: { sectionId: String(SECTION_ID), sectionPosition: 0 },
+        location_label: null, location_lat: null, location_lng: null,
+      },
+    ],
     kanban_columns: [{ id: COL_TODO, name: 'To do', order_index: 0, canvas_id: BOARD_ID }],
     kanban_swimlanes: [{ id: ROW_LOW, name: 'Low', order_index: 0, canvas_id: BOARD_ID }],
     kanban_cards: [
@@ -159,6 +175,7 @@ const modelContext = () =>
 beforeEach(async () => {
   vi.clearAllMocks();
   vi.resetModules();
+  boardLayout = 'kanban';
   process.env.BOARD_AI_PROVENANCE_SIGNING_KEY = Buffer.alloc(32, 13).toString('base64');
   mocks.cookies.mockResolvedValue({});
   mocks.createRouteHandlerClient.mockReturnValue(sessionClient());
@@ -321,5 +338,85 @@ describe('PATCH-351 warnings on a proposed plan', () => {
     propose([{ kind: 'update', card: 'S1.1', priority: 3 }]);
     const changes = await proposed();
     expect(changes[0].warnings).toBeUndefined();
+  });
+});
+
+describe('PATCH-372 a Padlet turn proposes posts and panels', () => {
+  const body = () => ({
+    message: 'Group these ideas into columns by theme',
+    context: { items: [{ type: 'padlet-board' }] },
+  });
+
+  const propose = (changes: unknown[]) => {
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: `Here is what I would change.\n<board-changes>${JSON.stringify({ changes })}</board-changes>`,
+      provider: 'deepseek',
+      model: 'deepseek-chat',
+      source: 'byok',
+    });
+  };
+
+  const proposed = async (): Promise<Array<Record<string, unknown>>> => {
+    const response = await post(body());
+    const payload = await response.json() as { message: { proposedPadletChanges?: Array<Record<string, unknown>> } };
+    return payload.message.proposedPadletChanges ?? [];
+  };
+
+  beforeEach(() => {
+    boardLayout = 'columns';
+    // The layout is captured when the client is built, so rebuild it here.
+    mocks.createRouteHandlerClient.mockReturnValue(sessionClient());
+  });
+
+  it('strips the block from the visible answer and returns the resolved changes', async () => {
+    propose([{ kind: 'create-panel', panel: 'Risks' }, { kind: 'move', post: 'S1.1', panel: 'Risks' }]);
+    const response = await post(body());
+    const payload = await response.json() as { message: { content: string; proposedPadletChanges?: Array<Record<string, unknown>> } };
+
+    expect(payload.message.content).toBe('Here is what I would change.');
+    expect(payload.message.content).not.toContain('board-changes');
+    expect(payload.message.proposedPadletChanges).toEqual([
+      { kind: 'create-panel', label: 'New column “Risks”', panelKind: 'section', newPanelName: 'Risks' },
+      {
+        kind: 'move',
+        label: 'Move “Ideas · First idea” to “Risks”',
+        postId: POST_A,
+        postTitle: 'Ideas · First idea',
+        panelKind: 'section',
+        newPanelName: 'Risks',
+      },
+    ]);
+  });
+
+  it('a Padlet turn carries no Kanban proposals, and vice versa', async () => {
+    propose([{ kind: 'create-panel', panel: 'Risks' }]);
+    const response = await post(body());
+    const payload = await response.json() as { message: Record<string, unknown> };
+    expect(payload.message.proposedChanges).toBeUndefined();
+    expect(payload.message.proposedPadletChanges).toBeDefined();
+  });
+
+  it('drops a change naming a token or a panel this turn does not have', async () => {
+    propose([
+      { kind: 'move', post: 'S1.9', panel: 'Ideas' }, // no such passage
+      { kind: 'move', post: 'S1.1', panel: 'Nope' }, // no such panel
+      { kind: 'move', post: 'S1.1', panel: 'Ideas' }, // good
+    ]);
+    const changes = await proposed();
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ postId: POST_A, panelId: String(SECTION_ID) });
+  });
+
+  it('a Kanban turn never gets Padlet proposals', async () => {
+    boardLayout = 'kanban';
+    mocks.executeBoardAiChat.mockResolvedValue({
+      text: 'Answer.\n<board-changes>{"changes":[{"kind":"create-panel","panel":"X"}]}</board-changes>',
+      provider: 'deepseek', model: 'deepseek-chat', source: 'byok',
+    });
+    const response = await post({ message: 'hi', context: { items: [{ type: 'kanban-board' }] } });
+    const payload = await response.json() as { message: Record<string, unknown> };
+    expect(payload.message.proposedPadletChanges).toBeUndefined();
+    // The Kanban turn does not read a Padlet block, so the text is untouched.
+    expect(String(payload.message.content)).toContain('board-changes');
   });
 });

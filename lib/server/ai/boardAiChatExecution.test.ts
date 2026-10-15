@@ -331,3 +331,30 @@ describe('PATCH-351 today and the planning rules ride ONLY on a Kanban turn', ()
     expect(serverToday(new Date('2026-10-14T00:30:00+02:00'))).toBe('2026-10-13');
   });
 });
+
+describe('PATCH-372 the Padlet change instructions ride ONLY on a padlet-board turn', () => {
+  it('the no-Padlet prompt is byte-identical to the exported constant', () => {
+    expect(boardAiChatSystemPrompt('off', false, undefined, false)).toBe(BOARD_AI_CHAT_SYSTEM_PROMPT);
+    expect(BOARD_AI_CHAT_SYSTEM_PROMPT).not.toContain('<board-changes>');
+  });
+
+  it('a Kanban turn is byte-identical to before Padlet existed', () => {
+    // The Kanban prompt does not gain a byte from PATCH-372.
+    expect(boardAiChatSystemPrompt('off', true, '2026-10-14')).toBe(
+      boardAiChatSystemPrompt('off', true, '2026-10-14', false),
+    );
+  });
+
+  it('a Padlet turn appends the change block instructions and nothing else', () => {
+    const padlet = boardAiChatSystemPrompt('off', false, undefined, true);
+    expect(padlet).toContain('<board-changes>');
+    expect(padlet).toContain('S2.5');
+    expect(padlet).toContain('Never delete posts');
+    expect(padlet).toContain('PROPOSAL awaiting');
+    // The base prompt is untouched: the Padlet text is purely an appendage, and
+    // it carries no Kanban instructions and no "Today".
+    expect(padlet.startsWith(BOARD_AI_CHAT_SYSTEM_PROMPT)).toBe(true);
+    expect(padlet).not.toContain('<kanban-changes>');
+    expect(padlet).not.toContain('Today is');
+  });
+});

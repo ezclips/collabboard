@@ -17,6 +17,7 @@ import {
   boardAiCitationSourceToken,
 } from '../../domain/ai/boardAiChatCitation';
 import { KANBAN_CHANGE_INSTRUCTIONS } from '../../domain/ai/kanbanChangeProposals';
+import { PADLET_CHANGE_INSTRUCTIONS } from '../../domain/ai/padletChangeProposals';
 import type { ResolvedBoardAiContextBlock } from '../../domain/ai/boardAiChatContext';
 import { getAIProviderAdapter } from './providers/registry';
 import { aiProviderInvalidConfiguration } from './providers/errors';
@@ -173,6 +174,7 @@ export function boardAiChatSystemPrompt(
   state: BoardAiChatSearchState = 'off',
   kanban = false,
   today?: string,
+  padlet = false,
 ): string {
   return [
   'You are the CollabBoard Board AI assistant.',
@@ -199,6 +201,10 @@ export function boardAiChatSystemPrompt(
   // a model with no today cannot schedule anything sensibly.
   ...(kanban ? [`Today is ${today ?? serverToday()}.`] : []),
   ...(kanban ? KANBAN_CHANGE_INSTRUCTIONS : []),
+  // PATCH-372. The Padlet-style change instructions ride only on a turn that
+  // carries a `padlet-board` block, so every other surface's prompt -- Kanban
+  // included -- is unchanged byte for byte.
+  ...(padlet ? PADLET_CHANGE_INSTRUCTIONS : []),
   ].join('\n');
 }
 
@@ -386,6 +392,10 @@ export async function executeBoardAiChat(
   // change instructions ride only then, so every other surface's prompt is
   // unchanged byte for byte.
   const kanban = context.some((block) => block.type === 'kanban-board');
+  // PATCH-372. A Padlet-style turn is one that carries the `padlet-board`
+  // overview. Map is excluded at the route (no `padlet-board` on a Map board),
+  // so this needs no layout check of its own.
+  const padlet = context.some((block) => block.type === 'padlet-board');
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), BOARD_AI_CHAT_TIMEOUT_MS);
@@ -400,7 +410,7 @@ export async function executeBoardAiChat(
       // Conditional, never globally weakened: with the toggle off this is the
       // exact string it has always been, and the Kanban change instructions are
       // present only on a turn that carries a `kanban-board` block.
-      system: boardAiChatSystemPrompt(searchState, kanban),
+      system: boardAiChatSystemPrompt(searchState, kanban, undefined, padlet),
       user: serializeBoardAiChatPayload(boundBoardAiChatHistory(turns), context),
       maxTokens: BOARD_AI_CHAT_MAX_TOKENS,
       temperature: BOARD_AI_CHAT_TEMPERATURE,
