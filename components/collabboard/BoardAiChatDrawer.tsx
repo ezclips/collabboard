@@ -207,6 +207,12 @@ export interface BoardAiChatDrawerProps {
   /** PATCH-372. The board's edit authority; false renders the list read-only. */
   readonly canApplyPadletChanges?: boolean;
   /**
+   * PATCH-375. The board is frozen. Freeze is folded into the board's edit
+   * authority, so `canApplyPadletChanges` is false for everyone on a frozen
+   * board -- the owner included -- and the proposals note has to say WHY.
+   */
+  readonly boardFrozen?: boolean;
+  /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
    * not a disabled button.
@@ -478,6 +484,7 @@ export default function BoardAiChatDrawer({
   onApplyKanbanChanges,
   onApplyPadletChanges,
   canApplyPadletChanges = false,
+  boardFrozen = false,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -1999,7 +2006,7 @@ export default function BoardAiChatDrawer({
                 </div>
               ) : null}
               <KanbanMessageProposals message={message} canEdit={canSaveAssistantAsCard} onApply={onApplyKanbanChanges} />
-              <PadletMessageProposals message={message} canEdit={canApplyPadletChanges} onApply={onApplyPadletChanges} />
+              <PadletMessageProposals message={message} canEdit={canApplyPadletChanges} frozen={boardFrozen} onApply={onApplyPadletChanges} />
               {canShowSaveAnswer ? (
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5 whitespace-normal">
                   <button

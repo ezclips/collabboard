@@ -36,8 +36,14 @@ export default function TimelineHeaderBar({
   currentMode,
   onModeChange,
 }: TimelineHeaderBarProps) {
+  // PATCH-375. `right-14`, not `right-2`: the floating Board AI button is
+  // `fixed right-4 top-4` and this bar is inside CanvasViewport, whose
+  // `isolation: isolate` traps the bar's z-30 below that button -- so with the
+  // title header hidden (the default) the button painted over this control's
+  // left edge. 56px clears the button's 16-52px band, and does so whether or not
+  // the title header is shown.
   return (
-    <div className="absolute top-2 right-2 z-30 flex items-center gap-2">
+    <div className="absolute top-2 right-14 z-30 flex items-center gap-2">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button

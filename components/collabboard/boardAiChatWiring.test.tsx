@@ -401,9 +401,12 @@ describe('10-15. one right-side dock, two directions', () => {
     // returned this button, so the close button rendered and could not be
     // clicked. The whole condition is pinned as one literal on purpose -- a
     // clause must not be droppable without this failing -- so a legitimately
-    // added clause updates it here.
+    // added clause updates it here. PATCH-375 replaced the leading
+    // `showBoardAssistantButtons && enableBoardAiChat` with the ONE launcher
+    // flag (Freeform plus the five Padlet layouts); the yield clauses are
+    // untouched.
     expect(CLIENT).toContain(
-      '{showBoardAssistantButtons && enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (');
+      '{showBoardAiLauncher && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (');
     // The reader reports its own open state; the board cannot derive it.
     expect(CLIENT).toContain('onOpenChange={setIsKnowledgeReaderOpen}');
     expect(READER).toContain('onOpenChange?.(isOpen);');

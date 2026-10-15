@@ -31,12 +31,12 @@ export type CanvasToolbarFlags = {
   isFreeformLayout: boolean;
   isFreeformGraphMode: boolean;
   isTimelineLayout: boolean;
-  /** PATCH-371. The other Padlet-style layouts the Board AI tool is added to. */
-  isWallLayout?: boolean;
-  isColumnsLayout?: boolean;
-  isGridLayout?: boolean;
-  /** PATCH-371. Board AI exists only when the feature flag is on and the caller is not a guest. */
-  enableBoardAiChat?: boolean;
+  /**
+   * PATCH-374. A guest, for the tools that are host-only. (PATCH-375 removed the
+   * `board-ai` tool this also gated, along with `isWallLayout`,
+   * `isColumnsLayout`, `isGridLayout` and `enableBoardAiChat`, which fed nothing
+   * else: Board AI is the floating top-right button on every layout now.)
+   */
   isGuest?: boolean;
   /**
    * PATCH-374. The facilitator kit (a shared countdown and "Bring everyone
@@ -216,10 +216,6 @@ export function buildCanvasToolbarGroups({
   isFreeformLayout,
   isFreeformGraphMode,
   isTimelineLayout,
-  isWallLayout = false,
-  isColumnsLayout = false,
-  isGridLayout = false,
-  enableBoardAiChat = false,
   isGuest = false,
   canFacilitate = false,
   canvasLayout = null,
@@ -242,13 +238,6 @@ export function buildCanvasToolbarGroups({
     ] : []),
   ];
 
-  // PATCH-371. Board AI on the Padlet-style layouts, in the toolbar rather than
-  // a floating button (the owner's PATCH-300 decision: floating buttons covered
-  // those layouts' top-right controls). Freeform keeps its floating button and
-  // Kanban keeps its rail button; a guest has no AI at all.
-  const isPadletBoardAiLayout = isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout || isMapLayout;
-  const showBoardAiTool = enableBoardAiChat && !isGuest && isPadletBoardAiLayout;
-
   // PATCH-374. The facilitator kit runs on the six layouts that share the
   // canvas viewport, and only for the board's host. Kanban, Scheduler and Gantt
   // are separate pages and come later.
@@ -267,20 +256,14 @@ export function buildCanvasToolbarGroups({
       priority: 1,
       alwaysVisible: true,
     }] : []),
-    // PATCH-371. Board AI: its own always-visible group. It is a read every
-    // reader may use, so it is NOT gated on board-content authority.
-    ...(showBoardAiTool ? [{
-      id: 'board-ai',
-      label: 'AI',
-      tools: [
-        { icon: Sparkles, label: 'Board AI', color: 'text-purple-600', bg: 'hover:bg-purple-50', type: 'board-ai' },
-      ],
-      priority: 3,
-      alwaysVisible: true,
-    }] : []),
-    // PATCH-374. Facilitate: next to Board AI, for the board's host only. It
-    // writes the `boards` row, not `padlets`, so it is deliberately NOT gated on
-    // board-content authority.
+    // PATCH-375. There is no `board-ai` toolbar tool any more. PATCH-371 put one
+    // here on the Padlet layouts, which showed the SAME Sparkles icon twice --
+    // once in this group and once in Create, directly below it. Board AI is now
+    // the floating top-right Bot button Freeform already used, on every layout
+    // (CanvasClient owns that; a guest is excluded there).
+    // PATCH-374. Facilitate: for the board's host only. It writes the `boards`
+    // row, not `padlets`, so it is deliberately NOT gated on board-content
+    // authority.
     ...(showFacilitateTool ? [{
       id: 'facilitate',
       label: 'Facilitate',

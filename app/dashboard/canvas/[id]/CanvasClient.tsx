@@ -1759,9 +1759,22 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
   const showBoardAssistantButtons = !!canvas && isFreeformLayout;
-  // PATCH-371. The Padlet-style layouts that get Board AI in the toolbar (and
-  // the `padlet-board` auto-context + post-citation scroll).
+  // PATCH-371. The Padlet-style layouts that get Board AI (the `padlet-board`
+  // auto-context + post-citation scroll). PATCH-375 also gives them the floating
+  // Board AI button below.
   const isPadletBoardAiLayout = isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout || isMapLayout;
+  /**
+   * PATCH-375. The ONE Board AI launcher -- the floating top-right Bot button --
+   * on every layout that shares the canvas viewport: Freeform, unchanged, plus
+   * the five Padlet layouts, where it replaces the toolbar tool PATCH-371 added
+   * (the same Sparkles icon appeared twice in the left toolbar).
+   *
+   * A guest gets no Board AI on the five, which is PATCH-371's rule; Freeform's
+   * `showBoardAssistantButtons` is unchanged. Kanban keeps its own rail button
+   * and never reaches this -- its branch returns before the button's call site.
+   */
+  const showBoardAiLauncher = enableBoardAiChat
+    && (showBoardAssistantButtons || (isPadletBoardAiLayout && !isGuestUser));
   // AI/Wiki-document release scope. Deliberately NOT isFreeformLayout: that
   // flag is the catch-all for Table/Stream and any unrecognised layout, none of
   // which add documents. One allowlist (Freeform + Scheduler), shared by the
@@ -9176,10 +9189,6 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     isFreeformLayout,
     isFreeformGraphMode,
     isTimelineLayout,
-    isWallLayout,
-    isColumnsLayout,
-    isGridLayout,
-    enableBoardAiChat,
     isGuest: isGuestUser,
     canFacilitate,
     canvasLayout: canvas?.layout ?? null,
@@ -9568,12 +9577,6 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       case 'share':
         closeAllToolbarLaunchedUi();
         setIsCanvasShareModalOpen(true);
-        break;
-      case 'board-ai':
-        // PATCH-371. The toolbar entry point for Board AI on the Padlet-style
-        // layouts, the analogue of Kanban's rail button.
-        closeAllToolbarLaunchedUi();
-        toggleBoardAiChat();
         break;
       case 'facilitate':
         // PATCH-374. The facilitator panel. The registry already withholds this
@@ -12473,6 +12476,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                edit authority -- a frozen board or a viewer gets no Apply. */
             onApplyPadletChanges={isPadletBoardAiLayout && canEditBoardContent ? applyPadletProposedChanges : undefined}
             canApplyPadletChanges={isPadletBoardAiLayout && canEditBoardContent}
+            /* PATCH-375. Freeze is folded into `canEditBoardContent`, so a frozen
+               board reads as "not an editor" to the proposals list. Pass the real
+               reason so its note says the board is frozen instead. */
+            boardFrozen={boardIsFrozen}
           />
         )}
 
@@ -12533,7 +12540,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             wiki's close control returned THIS button. The close button
             rendered, passed its test, and could not be clicked -- item 15's
             defect, one surface later. */}
-        {showBoardAssistantButtons && enableBoardAiChat && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (
+        {showBoardAiLauncher && !isBlockingEditorModalOpen && !isBoardAiChatOpen && !isKnowledgeReaderOpen && !isBoardWikiOpen && (
           <button
             type="button"
             data-board-ai-chat-open="true"

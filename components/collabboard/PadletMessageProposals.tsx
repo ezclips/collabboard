@@ -33,6 +33,13 @@ export interface PadletMessageProposalsProps {
   /** The board's edit authority. False renders the list read-only. */
   readonly canEdit: boolean;
   /**
+   * PATCH-375. The board is frozen, so `canEdit` is false for EVERYONE -- the
+   * owner included, because freeze is folded into the board's edit authority.
+   * Without this the note told an editor "Only editors can apply changes", which
+   * was simply wrong; the live PATCH-372 run found it.
+   */
+  readonly frozen?: boolean;
+  /**
    * The apply function. Absent for a viewer, so the two buttons are never
    * rendered -- the same rule the Kanban twin follows.
    */
@@ -41,7 +48,12 @@ export interface PadletMessageProposalsProps {
 
 type Phase = 'idle' | 'applying' | 'done';
 
-export default function PadletMessageProposals({ message, canEdit, onApply }: PadletMessageProposalsProps) {
+export default function PadletMessageProposals({
+  message,
+  canEdit,
+  frozen = false,
+  onApply,
+}: PadletMessageProposalsProps) {
   /**
    * Proposals are NOT persisted: a re-read of the thread comes back without
    * them, so the wire value is captured the moment the message carries it and
@@ -178,7 +190,7 @@ export default function PadletMessageProposals({ message, canEdit, onApply }: Pa
 
       {!canEdit ? (
         <p data-padlet-proposals-readonly="true" className="mt-1 text-[10px] text-gray-500">
-          Only editors can apply changes.
+          {frozen ? "This board is frozen. Changes can't be applied." : 'Only editors can apply changes.'}
         </p>
       ) : null}
 

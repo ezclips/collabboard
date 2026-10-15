@@ -3,10 +3,14 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 /**
- * PATCH-300. Both floating board assistant buttons are gated on ONE flag, and
- * that flag keeps them on freeform boards only. The drawers stay mounted
+ * PATCH-300. The two floating board assistant buttons were gated on ONE flag,
+ * and that flag kept them on freeform boards only. The drawers stay mounted
  * everywhere -- only these two launchers move -- so the gate lives on the
  * button conditions, read here out of the host rather than counted.
+ *
+ * PATCH-375. The Board AI launcher is no longer freeform-only: it is now the
+ * entry point on the five Padlet layouts too, so it has its own flag. The WIKI
+ * launcher below still rides the freeform-only one.
  */
 const CLIENT = fs.readFileSync(
   path.join(process.cwd(), 'app/dashboard/canvas/[id]/CanvasClient.tsx'), 'utf8');
@@ -28,7 +32,11 @@ describe('PATCH-300 board assistant buttons are freeform-only', () => {
     expect(conditionBefore('data-board-wiki-open="true"')).toContain('showBoardAssistantButtons &&');
   });
 
-  it('gates the Board AI launcher on the flag', () => {
-    expect(conditionBefore('data-board-ai-chat-open="true"')).toContain('showBoardAssistantButtons &&');
+  it('gates the Board AI launcher on its own flag, which covers the five too', () => {
+    // PATCH-375. The freeform flag is still a term of it -- so this button is
+    // still offered on a freeform board -- but it is no longer the whole gate.
+    expect(conditionBefore('data-board-ai-chat-open="true"')).toContain('showBoardAiLauncher &&');
+    expect(CLIENT).toContain('const showBoardAiLauncher = enableBoardAiChat');
+    expect(CLIENT).toContain('showBoardAssistantButtons || (isPadletBoardAiLayout && !isGuestUser)');
   });
 });

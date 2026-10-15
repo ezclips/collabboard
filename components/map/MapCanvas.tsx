@@ -967,7 +967,11 @@ function MapCanvas({
       ) : null}
 
       {addressPicker ? (
-        <div className="absolute right-3 top-12 z-30 w-64 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur-sm">
+        // PATCH-375. `top-14`, not `top-12`: the floating Board AI button is
+        // `fixed right-4 top-4`, and this picker is inside CanvasViewport, so at
+        // top-12 (48px) its top 4px sat under that button when the title header
+        // is hidden (the default). 56px clears the button entirely.
+        <div className="absolute right-3 top-14 z-30 w-64 rounded-xl border border-slate-200 bg-white/95 shadow-lg backdrop-blur-sm">
           <div className="flex items-center justify-between border-b border-slate-100 px-3 py-1.5">
             <span className="text-xs font-semibold text-slate-800">What are you pinning?</span>
             <button

@@ -98,6 +98,27 @@ describe('PATCH-372 PadletMessageProposals', () => {
     expect(q('[data-padlet-proposals-apply="true"]')).toBeNull();
     expect(q('[data-padlet-proposals-readonly="true"]')).not.toBeNull();
     expect((q('[data-padlet-proposal-checkbox="0"]') as HTMLInputElement).disabled).toBe(true);
+    expect(q('[data-padlet-proposals-readonly="true"]')!.textContent)
+      .toContain('Only editors can apply changes.');
+  });
+
+  it('says the board is frozen, not that the viewer is not an editor', async () => {
+    // PATCH-375. Freeze is folded into the board's edit authority, so on a
+    // frozen board `canEdit` is false for the OWNER too -- and the live
+    // PATCH-372 run showed the note calling that editor a non-editor.
+    await mount({ canEdit: false, onApply: undefined, frozen: true });
+    expect(q('[data-padlet-proposals-readonly="true"]')!.textContent)
+      .toBe("This board is frozen. Changes can't be applied.");
+    expect(q('[data-padlet-proposals-readonly="true"]')!.textContent)
+      .not.toContain('Only editors');
+  });
+
+  it('is not frozen and editable at the same time: the note is only for no-edit', async () => {
+    // An editable board shows no note at all, frozen flag or not.
+    const onApply = vi.fn(async () => []);
+    await mount({ frozen: true, onApply });
+    expect(q('[data-padlet-proposals-readonly="true"]')).toBeNull();
+    expect(q('[data-padlet-proposals-apply="true"]')).not.toBeNull();
   });
 
   it('keeps the proposals across a re-read that no longer carries them', async () => {

@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 //
-// PATCH-300: the Board AI and wiki buttons now render on freeform boards only,
-// so the column they forced the "Layout: Vertical" button away from no longer
-// exists on a Timeline board. It moves back to the corner at `right-2`. Nothing
-// else moves.
+// PATCH-300 moved this bar back to the corner at `right-2`: the floating Board
+// AI and wiki launchers rendered on freeform boards only, so the column they had
+// forced the "Layout: Vertical" button away from no longer existed here.
+//
+// PATCH-375 puts the floating Board AI button BACK on the five Padlet layouts --
+// it replaces the toolbar's duplicate Sparkles tool -- so this bar has to clear
+// it again. `right-14` (56px) is past the button's 16-52px band. A vertical
+// offset on the button could not have worked instead: the bar's own y depends on
+// whether the title header is shown (it defaults to hidden), so any single
+// `top-*` would overlap in one of the two states.
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
@@ -42,13 +48,14 @@ afterEach(() => {
   mounted = [];
 });
 
-describe('TimelineHeaderBar layout button position (PATCH-300)', () => {
-  it('sits back in the corner at right-2, not right-16', () => {
+describe('TimelineHeaderBar layout button position (PATCH-375)', () => {
+  it('clears the floating Board AI button at right-14', () => {
     const container = mount(
       <TimelineHeaderBar currentMode="vertical" onModeChange={() => {}} />,
     );
     const root = container.firstElementChild as HTMLElement;
-    expect(root.className).toContain('right-2');
+    expect(root.className).toContain('right-14');
+    expect(root.className).not.toContain('right-2');
     expect(root.className).not.toContain('right-16');
   });
 });
