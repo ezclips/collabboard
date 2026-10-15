@@ -78,7 +78,13 @@ function installSupabase(writes: Writes, opts: { instantPadlets?: Record<string,
   const client = {
     channel: () => {
       const ch = {
-        on: (_event: string, _cfg: unknown, handler: RealtimeHandler) => { realtimeHandler = handler; return ch; },
+        // PATCH-373: useCanvasData now also opens a board_sections channel, and
+        // this fake shares one `realtimeHandler` across channels, so record the
+        // PADLETS handler by its config rather than "the last one registered".
+        on: (_event: string, cfg: unknown, handler: RealtimeHandler) => {
+          if ((cfg as { table?: string } | null)?.table === 'padlets') realtimeHandler = handler;
+          return ch;
+        },
         subscribe: () => ch,
       };
       return ch;

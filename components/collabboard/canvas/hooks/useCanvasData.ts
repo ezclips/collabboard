@@ -50,6 +50,7 @@ import {
 import type { Canvas, Padlet, CanvasLine, BoardSection } from '@/types/collabboard';
 import { generateAndSaveThumbnail, updateLastVisited } from '@/lib/collabboard/thumbnailGenerator';
 import { debugCanvasLogger } from '@/lib/collabboard/debugCanvasLogger';
+import { useBoardSectionsRealtime } from './useBoardSectionsRealtime';
 import type { CanvasAction } from '../store/actions';
 
 interface UseCanvasDataParams {
@@ -363,6 +364,11 @@ export function useCanvasData({ canvasId, dispatch }: UseCanvasDataParams) {
       }
     };
   }, [canvasId, handleRealtimePadletChange, fetchData]);
+
+  // PATCH-373. Columns/Grid sections, live -- on its OWN channel, so a table
+  // missing from the realtime publication can silence section updates only and
+  // never the padlets channel (one unpublished table kills the whole channel).
+  useBoardSectionsRealtime(canvasId, setSections);
 
   /* -------------------------------------------------------------------------- */
   /*                                Optimized Update                               */
