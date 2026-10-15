@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * PATCH-376. The layout picker in Canvas settings, on its own so PATCH-377's
- * real cross-family conversion can extend it without growing the window again.
+ * PATCH-376/377. The layout picker in Canvas settings.
  *
- * A tile of the OTHER family is shown DISABLED with the reason under the row,
- * never removed: a missing tile reads as a bug, a disabled one with a reason
- * reads as a plan. The rule itself is pure and lives in
- * `lib/domain/canvas/layoutSwitchFamilies.ts` -- this file only presents it.
+ * PATCH-376 disabled the other family's tiles because a bare `boards.layout`
+ * change across families left the board looking empty. PATCH-377 CONVERTS the
+ * posts instead (`public.convert_board_layout`), so all four tiles are selectable
+ * again -- and choosing the other family shows what will happen to the posts,
+ * counted from the loaded ones, so nobody has to guess.
+ *
+ * The rules are pure and live in `lib/domain/canvas/layoutSwitchFamilies.ts`;
+ * this file only presents them.
  */
 
 import React from 'react';
@@ -15,9 +18,10 @@ import { Columns3, Grid3X3, Layers3, Clock } from 'lucide-react';
 
 import type { LayoutType } from '@/types/collabboard';
 import {
-  CROSS_FAMILY_NOTE,
-  canSwitchLayout,
+  CARD_COMMENTS_NOTE,
   layoutFamily,
+  layoutSwitchPlan,
+  type LayoutSwitchCounts,
 } from '@/lib/domain/canvas/layoutSwitchFamilies';
 
 /**
@@ -40,6 +44,8 @@ export interface CanvasLayoutTilesProps {
   /** False for a viewer: every tile is disabled, as the window's other inputs are. */
   readonly canEdit: boolean;
   readonly onSelect: (layout: LayoutType) => void;
+  /** PATCH-377. What the board has now, for the conversion sentence. */
+  readonly counts: LayoutSwitchCounts;
 }
 
 export default function CanvasLayoutTiles({
@@ -47,6 +53,7 @@ export default function CanvasLayoutTiles({
   selectedLayout,
   canEdit,
   onSelect,
+  counts,
 }: CanvasLayoutTilesProps) {
   // Null for a layout with neither posts shape -- the old "not available" line.
   if (!layoutFamily(currentLayout)) {
@@ -57,23 +64,21 @@ export default function CanvasLayoutTiles({
     );
   }
 
+  const plan = layoutSwitchPlan(currentLayout, selectedLayout, counts);
+  const convertSummary = plan?.kind === 'convert' ? plan.summary : null;
+
   return (
     <>
       <div className="grid grid-cols-4 gap-2">
         {SWITCHABLE_LAYOUTS.map((option) => {
           const IconComponent = option.icon;
           const isSelected = selectedLayout === option.id;
-          // A tile of the OTHER family would hide every post, so it is disabled
-          // with the reason under the row rather than removed.
-          const crossFamily = !canSwitchLayout(currentLayout, option.id);
           return (
             <button
               key={option.id}
               type="button"
               data-settings-layout={option.id}
-              {...(crossFamily ? { 'data-settings-layout-disabled': 'true' } : {})}
-              disabled={!canEdit || crossFamily}
-              title={crossFamily ? CROSS_FAMILY_NOTE : undefined}
+              disabled={!canEdit}
               onClick={() => onSelect(option.id)}
               className={`flex flex-col items-center gap-1 rounded-lg border-2 px-2 py-3 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 isSelected ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'
@@ -85,9 +90,12 @@ export default function CanvasLayoutTiles({
           );
         })}
       </div>
-      <p data-settings-layout-note="true" className="text-xs text-gray-500">
-        {CROSS_FAMILY_NOTE}
-      </p>
+      {convertSummary ? (
+        <p data-settings-layout-convert-summary="true" className="text-xs text-gray-500">
+          {convertSummary}
+          {counts.commentedPanels > 0 ? ` ${CARD_COMMENTS_NOTE}` : ''}
+        </p>
+      ) : null}
     </>
   );
 }

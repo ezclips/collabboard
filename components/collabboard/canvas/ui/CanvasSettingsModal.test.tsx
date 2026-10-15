@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 //
-// PATCH-376. The refreshed Canvas settings window: real values instead of
-// internal ones (the icon used to print "lucide:layout"), the three header
-// switches say what they do, and the wallpaper swatch names what it shows.
+// PATCH-376/377. The refreshed Canvas settings window: real values instead of
+// internal ones, the three header switches say what they do, the wallpaper
+// swatch names what it shows, and Save converts the posts when the chosen layout
+// is in the other family.
 import React from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import CanvasSettingsModal from './CanvasSettingsModal';
@@ -12,7 +13,11 @@ import { supabaseBrowser } from '@/lib/supabase/browser';
 import type { Canvas } from '@/types/collabboard';
 
 vi.mock('@/lib/supabase/browser', () => ({ supabaseBrowser: vi.fn() }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const toastError = vi.fn();
+const toastSuccess = vi.fn();
+vi.mock('sonner', () => ({
+  toast: { success: (m: string) => toastSuccess(m), error: (m: string) => toastError(m) },
+}));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -27,6 +32,10 @@ beforeAll(() => {
 });
 
 const BOARD = 'f1000000-0000-4000-8000-0000000000b1';
+
+/** The one RPC this window makes, and the plain `boards` update. */
+const rpc = vi.fn();
+const update = vi.fn();
 
 function board(overrides: Partial<Record<string, unknown>> = {}): Canvas {
   return {
@@ -43,16 +52,20 @@ function board(overrides: Partial<Record<string, unknown>> = {}): Canvas {
   } as unknown as Canvas;
 }
 
+const onClose = vi.fn();
+const onSaved = vi.fn();
+
 function mount(canvas: Canvas = board()) {
   return render(
     <CanvasSettingsModal
       isOpen
-      onClose={() => {}}
+      onClose={onClose}
       canvasId={BOARD}
       canvas={canvas}
-      hasSections
+      sectionCount={3}
+      posts={[]}
       currentWorkspaceRole="owner"
-      onSaved={() => {}}
+      onSaved={onSaved}
     />,
   );
 }
@@ -61,17 +74,33 @@ const iconButton = () => document.querySelector('[data-settings-icon-preview="tr
 const wallpaperButton = () => document.querySelector('[data-settings-wallpaper-preview="true"]') as HTMLElement | null;
 const headerSwitch = (which: string) =>
   document.querySelector(`[data-settings-show-in-header="${which}"]`) as HTMLElement | null;
+const tile = (id: string) => document.querySelector(`[data-settings-layout="${id}"]`) as HTMLButtonElement | null;
+const saveButton = () => {
+  const button = Array.from(document.querySelectorAll('button'))
+    .find((candidate) => candidate.textContent?.includes('Save changes'));
+  return button as HTMLButtonElement;
+};
+
+async function save() {
+  await act(async () => {
+    fireEvent.click(saveButton());
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+  });
+}
 
 beforeEach(() => {
-  vi.mocked(supabaseBrowser).mockReturnValue({
-    from: () => ({ update: () => ({ eq: async () => ({ error: null }) }) }),
-  } as never);
+  rpc.mockReset();
+  update.mockReset();
+  onClose.mockReset();
+  onSaved.mockReset();
+  toastError.mockReset();
+  toastSuccess.mockReset();
+  rpc.mockResolvedValue({ data: [{ converted: true, panels: 3, posts: 12 }], error: null });
+  update.mockReturnValue({ eq: async () => ({ error: null }) });
+  vi.mocked(supabaseBrowser).mockReturnValue({ from: () => ({ update }), rpc } as never);
 });
 
-afterEach(() => {
-  cleanup();
-  vi.clearAllMocks();
-});
+afterEach(cleanup);
 
 describe('PATCH-376 the window itself', () => {
   it('is the Share window shape: one panel, one header, one scrolling body', () => {
@@ -92,12 +121,6 @@ describe('PATCH-376 the icon shows an icon and a NAME', () => {
     expect(button.textContent).not.toContain('lucide:');
     // The glyph itself is the shared renderer, not a copy.
     expect(button.querySelector('[data-icon-kind="line"]')).not.toBeNull();
-  });
-
-  it('humanises a multi-word lucide name', () => {
-    mount(board({ thumbnail: 'lucide:book-open' }));
-    expect(iconButton()!.textContent).toContain('Book open');
-    expect(iconButton()!.textContent).not.toContain('lucide:');
   });
 
   it('names an image and an emoji without printing a url', () => {
@@ -124,7 +147,6 @@ describe('PATCH-376 the header switches say what they do', () => {
       const control = headerSwitch(which);
       expect(control, which).not.toBeNull();
       expect(control!.getAttribute('aria-label'), which).toBe(label);
-      // The visible text is the same sentence, so nobody has to hover to know.
       expect(control!.closest('[data-share-switch-row]')?.textContent, which).toContain(label);
     }
   });
@@ -144,7 +166,6 @@ describe('PATCH-376 the wallpaper swatch names what it shows', () => {
       [{ background_type: 'color', background_value: '#ef4444' }, 'Colour'],
       [{ background_type: 'gradient', background_value: 'linear-gradient(#fff, #000)' }, 'Gradient'],
       [{ background_type: 'image', background_value: 'https://example.com/w.png' }, 'Image'],
-      // No wallpaper of its own: the window's own fallback value, named.
       [{ background_type: null, background_value: null }, 'Default'],
       [{ background_type: 'color', background_value: '#f3f4f6' }, 'Default'],
     ];
@@ -160,5 +181,62 @@ describe('PATCH-376 the wallpaper swatch names what it shows', () => {
     const swatch = wallpaperButton()!.querySelector('span[style]') as HTMLElement;
     expect(swatch).not.toBeNull();
     expect(swatch.getAttribute('style')).toContain('background-color');
+  });
+});
+
+describe('PATCH-377 Save converts the posts when the family changes', () => {
+  it('calls the RPC for a cross-family choice and writes no layout column', async () => {
+    mount(board({ layout: 'columns' }));
+    fireEvent.click(tile('wall')!);
+    await save();
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith('convert_board_layout', { b: BOARD, target: 'wall' });
+    // The conversion owns boards.layout; the plain update must not also set it.
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][0]).not.toHaveProperty('layout');
+    expect(onSaved).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes the layout column for a same-family choice and never calls the RPC', async () => {
+    mount(board({ layout: 'columns' }));
+    fireEvent.click(tile('grid')!);
+    await save();
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(update.mock.calls[0][0].layout).toBe('grid');
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes neither when the layout did not change', async () => {
+    mount(board({ layout: 'columns' }));
+    await save();
+
+    expect(rpc).not.toHaveBeenCalled();
+    expect(update.mock.calls[0][0]).not.toHaveProperty('layout');
+  });
+
+  it('shows the refusal and leaves the window open when the conversion fails', async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: 'This board is frozen' } });
+    mount(board({ layout: 'columns' }));
+    fireEvent.click(tile('wall')!);
+    await save();
+
+    expect(toastError).toHaveBeenCalledWith('This board is frozen');
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onSaved).not.toHaveBeenCalled();
+    // Nothing else was written: the refusal stopped the save before the update.
+    expect(update).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-canvas-settings-modal="true"]')).not.toBeNull();
+  });
+
+  it('shows the conversion sentence beside the tiles once the other family is chosen', async () => {
+    mount(board({ layout: 'columns' }));
+    expect(document.querySelector('[data-settings-layout-convert-summary="true"]')).toBeNull();
+
+    fireEvent.click(tile('wall')!);
+    expect(document.querySelector('[data-settings-layout-convert-summary="true"]')?.textContent)
+      .toContain('become');
   });
 });

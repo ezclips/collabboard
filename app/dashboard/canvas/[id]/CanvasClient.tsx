@@ -129,6 +129,7 @@ import { useBoardPresence } from '@/components/collabboard/presence/useBoardPres
 import { useBoardGuestSettings } from '@/components/collabboard/canvas/hooks/useBoardGuestSettings';
 import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceStack';
 import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
+import { useBoardLayoutLive } from '@/components/collabboard/canvas/hooks/useBoardLayoutLive';
 import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
 import PendingPostsPill from '@/components/collabboard/canvas/ui/PendingPostsPill';
 import BoardTimerPill from '@/components/collabboard/facilitation/BoardTimerPill';
@@ -745,6 +746,12 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     await flushPendingPadletMeta();
     return fetchDataRaw(showLoading);
   }, [fetchDataRaw, flushPendingPadletMeta]);
+
+  // PATCH-377 Addendum 1. A cross-family switch in another tab rewrites this
+  // board's layout; without this the page would keep rendering the layout it
+  // loaded with, and a converted board would show its posts nowhere. The hook
+  // watches `boards` and asks for exactly the refetch above.
+  useBoardLayoutLive(canvasId, canvas?.layout, fetchData);
 
   // PATCH-337. Nothing may drop a pending save on the way out: flush on the
   // canvas unmount, on `pagehide`, and when the tab is hidden.
@@ -9981,7 +9988,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           onClose={() => setIsCanvasSettingsModalOpen(false)}
           canvasId={canvas.id}
           canvas={canvas}
-          hasSections={sections.length > 0}
+          sectionCount={sections.length}
+          /* PATCH-377. The layout row counts what a cross-family switch would
+             convert from the board's own posts. */
+          posts={padlets}
           currentWorkspaceRole={currentWorkspaceRole}
           onSaved={() => fetchData()}
         />

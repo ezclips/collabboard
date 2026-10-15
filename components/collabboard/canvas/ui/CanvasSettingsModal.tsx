@@ -15,43 +15,26 @@ import IconSelector from '@/components/collabboard/canvas/IconSelector';
 import BoardIconGlyph from '@/components/collabboard/BoardIconGlyph';
 import ShareSwitchRow from '@/components/collabboard/canvas/ui/ShareSwitchRow';
 import CanvasLayoutTiles from '@/components/collabboard/canvas/ui/CanvasLayoutTiles';
-import { canSwitchLayout } from '@/lib/domain/canvas/layoutSwitchFamilies';
-
-/**
- * PATCH-376. A readable name for a board icon. The window used to print the
- * stored value verbatim, so a `lucide:layout` board read "lucide:layout".
- */
-function iconDisplayName(icon: string): string | null {
-  if (icon.startsWith('lucide:')) {
-    const name = icon.slice('lucide:'.length).replace(/-/g, ' ').trim();
-    return name ? name.charAt(0).toUpperCase() + name.slice(1) : 'Icon';
-  }
-  if (icon.startsWith('http') || icon.startsWith('data:')) return 'Image';
-  return icon ? 'Emoji' : null;
-}
-
-/**
- * PATCH-376. What the wallpaper swatch says -- a kind, never a raw value.
- * `#f3f4f6` reads "Default" because it IS this window's fallback: a board that
- * never chose a wallpaper is stored as exactly that value, so it is the only
- * honest name for it (and the palette's `#ffffff` is the explicit white).
- */
-function wallpaperLabel(type: string | null | undefined, value: string | null | undefined): string {
-  if (!type || !value) return 'Default';
-  if (type === 'image') return 'Image';
-  if (type === 'gradient') return 'Gradient';
-  const hex = value.toLowerCase();
-  if (hex === '#ffffff') return 'White';
-  if (hex === '#f3f4f6') return 'Default';
-  return 'Colour';
-}
+import { iconDisplayName, wallpaperLabel } from '@/lib/domain/canvas/canvasSettingsDisplay';
+import {
+  layoutSwitchCounts,
+  layoutSwitchPlan,
+  type LayoutSwitchPost,
+} from '@/lib/domain/canvas/layoutSwitchFamilies';
 
 interface CanvasSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
   canvasId: string;
   canvas: Canvas | null;
-  hasSections: boolean;
+  /** How many sections the board has; 0 means switching into Columns needs one made. */
+  sectionCount: number;
+  /**
+   * PATCH-377. The board's loaded posts. Only the layout row reads them: a
+   * cross-family switch converts the posts, and the sentence beside the tiles is
+   * counted from these rather than guessed.
+   */
+  posts?: readonly LayoutSwitchPost[];
   currentWorkspaceRole: WorkspaceRole | null;
   onSaved: () => void;
 }
@@ -61,7 +44,8 @@ export default function CanvasSettingsModal({
   onClose,
   canvasId,
   canvas,
-  hasSections,
+  sectionCount,
+  posts = [],
   currentWorkspaceRole,
   onSaved,
 }: CanvasSettingsModalProps) {
@@ -103,6 +87,9 @@ export default function CanvasSettingsModal({
     setLayout(canvas.layout);
   }, [isOpen, canvas]);
 
+  // PATCH-377. What a conversion would move, and what the tiles say about it.
+  const switchCounts = layoutSwitchCounts(canvas?.layout, posts, sectionCount);
+
   const handleSave = async () => {
     if (!canEdit) {
       toast.error('You do not have permission to change canvas settings');
@@ -115,6 +102,21 @@ export default function CanvasSettingsModal({
 
     setSaving(true);
     try {
+      // PATCH-377. A cross-family change is NOT a plain `boards.layout` write: the
+      // posts have to be converted with it, and `convert_board_layout` does that
+      // in ONE transaction. It runs FIRST, so a refusal (frozen board, no
+      // authority) stops the save before anything else is written.
+      const plan = layoutSwitchPlan(canvas?.layout, layout, switchCounts);
+      const changingLayout = layout !== canvas?.layout;
+
+      if (changingLayout && plan?.kind === 'convert') {
+        const { error: convertError } = await supabase.rpc('convert_board_layout', {
+          b: canvasId,
+          target: layout,
+        });
+        if (convertError) throw convertError;
+      }
+
       const updates: Record<string, unknown> = {
         title: title.trim(),
         description: description.trim(),
@@ -136,9 +138,9 @@ export default function CanvasSettingsModal({
         updated_at: new Date().toISOString(),
       };
 
-      // Same family only, re-checked at the write: a cross-family layout would
-      // leave every post with nowhere to render (see the family helper).
-      if (layout !== canvas?.layout && canSwitchLayout(canvas?.layout, layout)) {
+      // A same-family switch is still just the layout column; a conversion has
+      // already set it, and an unavailable one changes nothing.
+      if (changingLayout && plan?.kind === 'same-family') {
         updates.layout = layout;
       }
 
@@ -147,8 +149,8 @@ export default function CanvasSettingsModal({
 
       // Columns needs at least one section for posts to land in; create a default
       // one so switching into Columns on a canvas that never had any doesn't
-      // silently hide every existing post.
-      if (updates.layout === 'columns' && !hasSections) {
+      // silently hide every existing post. A CONVERSION makes its own sections.
+      if (updates.layout === 'columns' && sectionCount === 0) {
         const { error: sectionError } = await supabase.from('board_sections').insert({
           board_id: canvasId,
           title: 'General',
@@ -165,7 +167,9 @@ export default function CanvasSettingsModal({
       onClose();
     } catch (error) {
       console.error('Failed to save canvas settings:', error);
-      toast.error('Failed to save canvas settings');
+      // The message is the RPC's own when there is one ("This board is frozen",
+      // "not allowed"), and the window STAYS OPEN so the choice can be changed.
+      toast.error((error as { message?: string } | null)?.message || 'Failed to save canvas settings');
     } finally {
       setSaving(false);
     }
@@ -333,6 +337,7 @@ export default function CanvasSettingsModal({
                   selectedLayout={layout}
                   canEdit={canEdit}
                   onSelect={setLayout}
+                  counts={switchCounts}
                 />
               </div>
 
