@@ -30,15 +30,16 @@ export const BOARD_AI_DRAFT_PREVIEW_MAX = 60;
  *
  * A search is not an attachment: the user does not pick a source, they turn on
  * a toggle, and the server decides what it finds. A Kanban board OVERVIEW is
- * the same shape of thing (PATCH-322): the client adds it per turn, not the
- * composer. Excluding both here is what keeps the composer's four slots meaning
- * "things you chose", and it makes the payload switch below exhaustive by
- * construction rather than by a default case that would silently accept a shape
- * this path cannot send.
+ * the same shape of thing (PATCH-322), and a Padlet-style board OVERVIEW
+ * (PATCH-371) is the same again: the client adds it per turn, not the composer.
+ * Excluding them here is what keeps the composer's four slots meaning "things
+ * you chose", and it makes the payload switch below exhaustive by construction
+ * rather than by a default case that would silently accept a shape this path
+ * cannot send.
  */
 export type BoardAiDraftContextRequest = Exclude<
   BoardAiContextRequestItem,
-  { type: 'board-search' } | { type: 'kanban-board' }
+  { type: 'board-search' } | { type: 'kanban-board' } | { type: 'padlet-board' }
 >;
 
 /**

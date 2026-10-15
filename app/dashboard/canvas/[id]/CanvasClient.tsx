@@ -311,6 +311,8 @@ const PADLET_DRAG_START_DISTANCE = 8;
  * new array and re-renders for nothing.
  */
 const KANBAN_BOARD_AI_AUTO_CONTEXT: readonly BoardAiContextRequestItem[] = [{ type: 'kanban-board' }];
+// PATCH-371. The Padlet-style layouts' whole-board overview, added per turn.
+const PADLET_BOARD_AI_AUTO_CONTEXT: readonly BoardAiContextRequestItem[] = [{ type: 'padlet-board' }];
 
 const BADGE_COLORS = [
   "#fef9c3", "#fef08a", "#fde047", "#facc15", "#eab308", "#ca8a04",
@@ -1748,6 +1750,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
   const showBoardAssistantButtons = !!canvas && isFreeformLayout;
+  // PATCH-371. The Padlet-style layouts that get Board AI in the toolbar (and
+  // the `padlet-board` auto-context + post-citation scroll).
+  const isPadletBoardAiLayout = isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout || isMapLayout;
   // AI/Wiki-document release scope. Deliberately NOT isFreeformLayout: that
   // flag is the catch-all for Table/Stream and any unrecognised layout, none of
   // which add documents. One allowlist (Freeform + Scheduler), shared by the
@@ -3013,6 +3018,26 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
    * reader: that host keeps the board usable beside the document, and its own
    * existing rule already closes this chat as the reader takes the dock.
    */
+  /**
+   * PATCH-370/371. Bring a post's card into view and highlight it for 2 s.
+   *
+   * The ONE scroll helper: the owner's pending pill uses it on the non-Freeform
+   * layouts, and a Board AI citation uses it here. `[data-post-card-id]` is the
+   * marker PostCardContent and RowColumnContainerCard put on a card's root --
+   * never `data-padlet-id`, which Freeform already owns.
+   */
+  const scrollToPostCard = useCallback((padletId: string) => {
+    const el = document.querySelector(`[data-post-card-id="${padletId}"]`) as HTMLElement | null;
+    if (!el) return;
+    // PATCH-371 Addendum 2. Ring the card the user SEES, not the inner content
+    // strip: each layout's post card marks its own outer element with
+    // `data-post-card-shell`, so the highlight lands on the whole card.
+    const target = (el.closest('[data-post-card-shell]') as HTMLElement | null) ?? el;
+    target.scrollIntoView({ block: 'center' });
+    target.style.outline = '2px solid #6366f1';
+    window.setTimeout(() => { target.style.outline = ''; }, 2000);
+  }, []);
+
   const openBoardAiCitation = useCallback((request: {
     readonly knowledgeDocumentId?: string;
     /** PATCH-196. A cited wiki page, opened in the board wiki drawer. */
@@ -8969,6 +8994,11 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     isFreeformLayout,
     isFreeformGraphMode,
     isTimelineLayout,
+    isWallLayout,
+    isColumnsLayout,
+    isGridLayout,
+    enableBoardAiChat,
+    isGuest: (user as { is_anonymous?: boolean } | null)?.is_anonymous === true,
     chronoMode,
     canManageCanvasShare,
     canUseFreeformEditButton,
@@ -9354,6 +9384,12 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       case 'share':
         closeAllToolbarLaunchedUi();
         setIsCanvasShareModalOpen(true);
+        break;
+      case 'board-ai':
+        // PATCH-371. The toolbar entry point for Board AI on the Padlet-style
+        // layouts, the analogue of Kanban's rail button.
+        closeAllToolbarLaunchedUi();
+        toggleBoardAiChat();
         break;
       case 'canvas-settings':
         closeAllToolbarLaunchedUi();
@@ -11296,11 +11332,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: oldest.id });
                     return;
                   }
-                  const el = document.querySelector(`[data-post-card-id="${oldest.id}"]`) as HTMLElement | null;
-                  if (!el) return;
-                  el.scrollIntoView({ block: 'center' });
-                  el.style.outline = '2px solid #6366f1';
-                  window.setTimeout(() => { el.style.outline = ''; }, 2000);
+                  scrollToPostCard(oldest.id);
                 }}
               />
             ) : null}
@@ -12207,6 +12239,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             /* The same reduction the selected item uses, so a dropped post and
                a selected one cannot become two different things. */
             onResolveDroppedPost={boardAiChatItemForPostId}
+            /* PATCH-371. On the Padlet-style layouts the drawer auto-attaches
+               the whole-board overview, and a cited post scrolls into view. */
+            autoContextRequests={isPadletBoardAiLayout ? PADLET_BOARD_AI_AUTO_CONTEXT : undefined}
+            onOpenPostCitation={isPadletBoardAiLayout ? scrollToPostCard : undefined}
           />
         )}
 

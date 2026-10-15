@@ -61,6 +61,7 @@ function SortableContainerItem({ id, children, disabled, widthClass, containerId
             style={style}
             {...attributes}
             {...listeners}
+            data-post-card-shell="true"
             {...(containerId ? { 'data-container-id': containerId } : {})}
             className={`relative shrink-0 outline-none group/sortable ${widthClass || 'w-[280px]'}`}
         >

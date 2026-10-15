@@ -31,6 +31,9 @@ export const BOARD_AI_CONTEXT_TYPES = [
   // Additive in the same sense as `board-search`, so the version still holds.
   'kanban-card',
   'kanban-board',
+  // PATCH-371. Padlet-style layouts (Wall, Columns, Grid, Timeline, Map): the
+  // whole board as one overview block. Additive like the two above.
+  'padlet-board',
 ] as const;
 
 export type BoardAiContextType = (typeof BOARD_AI_CONTEXT_TYPES)[number];
@@ -172,6 +175,18 @@ export interface KanbanBoardContextRequest {
   readonly type: 'kanban-board';
 }
 
+/**
+ * PATCH-371. A Padlet-style board (Wall, Columns, Grid, Timeline, Map) as one
+ * overview block.
+ *
+ * No fields: the server reads the board's sections and posts itself, through the
+ * caller's own client. CURRENT-TURN ONLY, exactly like `kanban-board`. Uses ONE
+ * slot.
+ */
+export interface PadletBoardContextRequest {
+  readonly type: 'padlet-board';
+}
+
 export type BoardAiContextRequestItem =
   | KnowledgeDocumentContextRequest
   | KnowledgePageContextRequest
@@ -180,7 +195,8 @@ export type BoardAiContextRequestItem =
   | PadletImageContextRequest
   | BoardSearchContextRequest
   | KanbanCardContextRequest
-  | KanbanBoardContextRequest;
+  | KanbanBoardContextRequest
+  | PadletBoardContextRequest;
 
 /* ------------------------------------------------------------------ */
 /* Persisted: identity + server-authored display metadata             */
@@ -468,6 +484,9 @@ export function boardAiContextItemsFromStored(value: unknown): readonly ParsedBo
       // PATCH-322. No fields. Current-turn only -- resolveHistorical drops it --
       // so this is a display record, not a standing instruction.
       request = { type: 'kanban-board' };
+    } else if (item.type === 'padlet-board') {
+      // PATCH-371. No fields, current-turn only, exactly like `kanban-board`.
+      request = { type: 'padlet-board' };
     }
     if (request === null) continue;
 
@@ -520,6 +539,9 @@ export function boardAiContextIdentityKey(item: BoardAiContextRequestItem): stri
     // are one non-attachable source.
     case 'kanban-board':
       return 'kanban-board';
+    // PATCH-371. Same rule for the Padlet-style overview.
+    case 'padlet-board':
+      return 'padlet-board';
   }
 }
 

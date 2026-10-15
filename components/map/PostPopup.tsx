@@ -129,6 +129,7 @@ export default function PostPopup({
     <div
       ref={wrapperRef}
       data-map-popup-root="true"
+      data-post-card-shell="true"
       className="group/popup relative w-[360px] rounded-xl border border-slate-200 bg-white/95 p-2 shadow-xl backdrop-blur"
     >
       <div className="mb-2 flex items-center gap-2 min-w-0">

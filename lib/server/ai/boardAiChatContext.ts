@@ -43,6 +43,12 @@ import {
   readKanbanCardBlock,
   type BoardAiKanbanSupabaseClient,
 } from './boardAiKanbanContext';
+// PATCH-371. The Padlet-style board reader, same caller's client, widened to
+// `boards` / `board_sections` / `padlets`.
+import {
+  readPadletBoardBlock,
+  type BoardAiPadletBoardSupabaseClient,
+} from './boardAiPadletBoardContext';
 
 /**
  * The reads this resolver performs, and nothing more. Supplied as the CALLER'S
@@ -278,6 +284,17 @@ async function resolveOne(
     // resolves to nothing, exactly as an unreadable one does.
     return readKanbanBoardBlock(
       client as unknown as BoardAiKanbanSupabaseClient,
+      boardId,
+      blockIndex,
+    );
+  }
+
+  if (item.type === 'padlet-board') {
+    // PATCH-371. The whole Padlet-style board as one overview block.
+    // CURRENT-TURN ONLY, exactly like `kanban-board`. A non-Padlet layout
+    // resolves to nothing, as does an unreadable board.
+    return readPadletBoardBlock(
+      client as unknown as BoardAiPadletBoardSupabaseClient,
       boardId,
       blockIndex,
     );
@@ -615,6 +632,9 @@ export async function resolveHistoricalBoardAiChatContext(
     // of an unrelated question. The stored item survives for its chip alone.
     // A `kanban-card` DOES re-resolve -- it is an attachment, like a padlet.
     if (item.type === 'kanban-board') continue;
+    // PATCH-371. A Padlet-style OVERVIEW is current-turn only for the same
+    // reason; the stored item survives for its chip alone.
+    if (item.type === 'padlet-board') continue;
     const resolved = await resolveOne(client, boardId, item, NEVER_READS_BYTES, blocks.length);
     if (resolved.ok && resolved.value !== null) blocks.push(resolved.value);
   }

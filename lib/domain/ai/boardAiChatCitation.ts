@@ -80,6 +80,9 @@ export const BOARD_AI_CITATION_INSTRUCTIONS: readonly string[] = [
   // PATCH-322. A Kanban overview is the same shape: one block, one line per
   // card, each line carrying a sub-token. The model cites the card line it used.
   'On a Kanban board, the board overview lists one line per card, each carrying an id of the form "S2.5". When your answer relies on a card, cite that card\'s line.',
+  // PATCH-371. A Padlet-style board overview is the same shape: one line per
+  // post, grouped into panels, each line carrying a sub-token.
+  'On a Wall, Columns, Grid, Timeline or Map board, the board overview lists its panels (columns, sections, cards, timeline items or map places) in order, each post with an id of the form "S2.5". When your answer relies on a post, cite that post\'s line.',
   // PATCH-196, D2: the chain-of-custody sentence. A wiki page is a compiled
   // summary, not evidence; where a raw passage supports a statement, that
   // passage is what gets cited, and a STALE page must be treated as possibly
@@ -228,6 +231,11 @@ export function boardAiCitationIdentityKey(item: BoardAiCitationItem): string {
     // Present so the switch stays exhaustive over BoardAiCitationItemType.
     case 'kanban-board':
       return 'kanban-board';
+    // PATCH-371. Unreachable in practice for the same reason: an overview block
+    // is not a place, so no citation item ever carries it. Present so the switch
+    // stays exhaustive over the citation item types.
+    case 'padlet-board':
+      return 'padlet-board';
     // Unreachable in practice -- citationItemFromBlock refuses a search block,
     // because a search is not a place a reader can be taken to. Present so the
     // switch stays exhaustive over BoardAiContextType, and keyed by nothing
@@ -289,6 +297,10 @@ function citationItemFromBlock(block: ResolvedBoardAiContextBlock): BoardAiCitat
       // PATCH-322. An overview is not a place: a bare S-token on it cites
       // nothing, and only its per-card passages (`S2.5`) resolve.
       return null;
+    case 'padlet-board':
+      // PATCH-371. The same for a Padlet-style overview: only its per-post
+      // passages (`S2.5`) resolve.
+      return null;
     case 'board-search':
       // A SEARCH IS STILL NOT A PLACE, and this refusal is NARROWED, not
       // lifted. The block holds passages from several posts and pages, so
@@ -322,9 +334,9 @@ function citationItemFromPassage(
   block: ResolvedBoardAiContextBlock,
   passageIndex: number,
 ): BoardAiCitationItem | null {
-  // Only a search block or a Kanban overview has passages, so a sub-token on
+  // Only a search block or a board overview has passages, so a sub-token on
   // anything else is refused here rather than being quietly read as its parent.
-  if (block.type !== 'board-search' && block.type !== 'kanban-board') return null;
+  if (block.type !== 'board-search' && block.type !== 'kanban-board' && block.type !== 'padlet-board') return null;
   const passage = block.passages?.[passageIndex];
   if (!passage) return null;
   return boardAiCitationItemFromPassage(passage);

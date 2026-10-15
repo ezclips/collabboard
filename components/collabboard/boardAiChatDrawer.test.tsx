@@ -1648,6 +1648,47 @@ describe('grounded citations', () => {
 });
 
 /**
+ * PATCH-371. A board POST citation is HOST-GATED: clickable only where the host
+ * supplied its own opener (the Padlet-style layouts), and a plain label
+ * everywhere else -- so Freeform's behaviour is unchanged.
+ */
+describe('PATCH-371 a board post citation', () => {
+  const POST = 'bbbbbbbb-2222-4222-8222-222222222222';
+  const postCitation = { type: 'padlet', padletId: POST, label: 'Went well · Shipping' };
+  const thread = [
+    { id: 'u-1', role: 'user', content: 'what is in each column?', provider: null, model: null, createdAt: 'n' },
+    {
+      id: 'a-1', role: 'assistant', content: 'Here.', provider: 'deepseek', model: 'deepseek-chat', createdAt: 'n',
+      citations: { version: 1, items: [postCitation] },
+    },
+  ];
+
+  async function mountPostCitation(onOpenPostCitation?: (padletId: string) => void) {
+    stubChat({ threads: [summary(THREAD_A, 'z')], messages: { [THREAD_A]: thread } });
+    await mount({ onOpenPostCitation } as never);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    return host;
+  }
+
+  it('is a plain label where the host supplies no post opener', async () => {
+    await mountPostCitation();
+    const chip = q('[data-board-ai-chat-citation]')!;
+    expect(chip.tagName).toBe('SPAN');
+    expect(chip.textContent).toContain('Went well · Shipping');
+  });
+
+  it('is a clickable chip that hands the post id to the host when it does', async () => {
+    const opened: string[] = [];
+    await mountPostCitation((id) => { opened.push(id); });
+    const chip = q('[data-board-ai-chat-citation]')!;
+    expect(chip.tagName).toBe('BUTTON');
+    expect(chip.getAttribute('data-board-ai-chat-citation-post')).toBe(POST);
+    await click(`[data-board-ai-chat-citation-post="${POST}"]`);
+    expect(opened).toEqual([POST]);
+  });
+});
+
+/**
  * PATCH-164. STARTER QUESTIONS.
  *
  * A document-scoped panel that opens empty asks the starter-questions route

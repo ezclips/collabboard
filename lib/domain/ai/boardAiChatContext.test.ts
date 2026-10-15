@@ -316,3 +316,35 @@ describe('PATCH-322 Kanban context is identity plus a server-authored chip', () 
     expect(boardAiContextIdentityKey({ type: 'kanban-board' })).toBe('kanban-board');
   });
 });
+
+describe('PATCH-371 padlet-board', () => {
+  it('parses with no fields and keeps its chip in the view', () => {
+    const view = boardAiContextViewFromStored({
+      version: 1,
+      items: [{ type: 'padlet-board', label: 'Retro', excerpt: '[S1.1] note · Shipping' }],
+    })!;
+    expect(view.items[0]).toMatchObject({ type: 'padlet-board', label: 'Retro' });
+    expect(boardAiContextRequestsFromStored({ version: 1, items: [{ type: 'padlet-board' }] }))
+      .toEqual([{ type: 'padlet-board' }]);
+  });
+
+  it('is dropped whole when it carries forged fields', () => {
+    // `.strict()` on the route is the real gate; the parser ignores extra keys.
+    expect(boardAiContextRequestsFromStored({
+      version: 1,
+      items: [{ type: 'padlet-board', padletId: PAD }],
+    })).toEqual([{ type: 'padlet-board' }]);
+  });
+
+  it('is keyed by nothing finer than the type', () => {
+    expect(boardAiContextIdentityKey({ type: 'padlet-board' })).toBe('padlet-board');
+  });
+
+  it('two overviews in one thread de-duplicate to one historical identity', () => {
+    const selected = selectHistoricalContextIdentities([
+      { version: 1, items: [{ type: 'padlet-board' }] },
+      { version: 1, items: [{ type: 'padlet-board' }] },
+    ]);
+    expect(selected).toEqual([{ type: 'padlet-board' }]);
+  });
+});

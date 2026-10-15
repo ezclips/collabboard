@@ -36,13 +36,33 @@ describe('PATCH-323 CanvasClient wires Board AI into the Kanban branch', () => {
     expect(kanbanBranch).not.toContain('openBoardWiki');
   });
 
-  it('the Freeform drawer does NOT pass an auto context', () => {
+  it('the Freeform drawer does NOT pass the Kanban overview', () => {
     const lastDrawer = source.lastIndexOf('<BoardAiChatDrawer');
     const freeformDrawer = source.slice(lastDrawer, source.indexOf('/>', lastDrawer));
-    expect(freeformDrawer).not.toContain('autoContextRequests');
+    // PATCH-371. The main-return drawer is shared by Freeform and the Padlet-
+    // style layouts, so it carries a LAYOUT-CONDITIONAL auto context; what must
+    // never appear there is the Kanban overview.
+    expect(freeformDrawer).not.toContain('KANBAN_BOARD_AI_AUTO_CONTEXT');
+  });
+
+  it('PATCH-371: the shared drawer adds the padlet-board overview only on those layouts', () => {
+    const lastDrawer = source.lastIndexOf('<BoardAiChatDrawer');
+    const sharedDrawer = source.slice(lastDrawer, source.indexOf('/>', lastDrawer));
+    expect(sharedDrawer).toContain('autoContextRequests={isPadletBoardAiLayout ? PADLET_BOARD_AI_AUTO_CONTEXT : undefined}');
+    expect(sharedDrawer).toContain('onOpenPostCitation={isPadletBoardAiLayout ? scrollToPostCard : undefined}');
   });
 
   it('a kanban-card citation opens the card through the bridge', () => {
     expect(source).toContain('kanbanBoardAiBridgeRef.current?.openCard(request.cardId)');
+  });
+
+  it('PATCH-371 Addendum 2: the citation scroll rings the CARD SHELL, not the inner content', () => {
+    expect(source).toContain("el.closest('[data-post-card-shell]')");
+    // Every Padlet-style layout marks the card the user actually sees.
+    const shell = (p: string) => fs.readFileSync(path.join(process.cwd(), p), 'utf8');
+    expect(shell('components/canvas/layouts/ColumnsCanvasRow.tsx')).toContain('data-post-card-shell');
+    expect(shell('components/collabboard/row/RowLane.tsx')).toContain('data-post-card-shell');
+    expect(shell('components/collabboard/RowColumnContainerCard.tsx')).toContain('data-post-card-shell');
+    expect(shell('components/map/PostPopup.tsx')).toContain('data-post-card-shell');
   });
 });

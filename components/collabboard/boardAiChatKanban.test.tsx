@@ -172,6 +172,15 @@ describe('PATCH-323 the Kanban overview rides on every turn as a fixed chip', ()
     expect(chip!.querySelector('button')).toBeNull();
   });
 
+  it('PATCH-371: the Padlet-style overview chip is labelled "Board overview"', async () => {
+    await mount({ autoContextRequests: [{ type: 'padlet-board' }] });
+    const chip = q('[data-board-ai-auto-context="padlet-board"]');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toContain('Board overview');
+    expect(chip!.textContent).not.toContain('padlet-board');
+    expect(chip!.querySelector('button')).toBeNull();
+  });
+
   it('appends the overview to a send that carries no attachment', async () => {
     await mount({ autoContextRequests: KANBAN_AUTO });
     await type('what is on the board?');

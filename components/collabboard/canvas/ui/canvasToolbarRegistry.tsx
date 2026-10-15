@@ -30,6 +30,13 @@ export type CanvasToolbarFlags = {
   isFreeformLayout: boolean;
   isFreeformGraphMode: boolean;
   isTimelineLayout: boolean;
+  /** PATCH-371. The other Padlet-style layouts the Board AI tool is added to. */
+  isWallLayout?: boolean;
+  isColumnsLayout?: boolean;
+  isGridLayout?: boolean;
+  /** PATCH-371. Board AI exists only when the feature flag is on and the caller is not a guest. */
+  enableBoardAiChat?: boolean;
+  isGuest?: boolean;
   chronoMode: ChronoMode | string | null;
   canManageCanvasShare: boolean;
   canUseFreeformEditButton: boolean;
@@ -182,6 +189,11 @@ export function buildCanvasToolbarGroups({
   isFreeformLayout,
   isFreeformGraphMode,
   isTimelineLayout,
+  isWallLayout = false,
+  isColumnsLayout = false,
+  isGridLayout = false,
+  enableBoardAiChat = false,
+  isGuest = false,
   chronoMode,
   canManageCanvasShare,
   canUseFreeformEditButton,
@@ -201,6 +213,13 @@ export function buildCanvasToolbarGroups({
     ] : []),
   ];
 
+  // PATCH-371. Board AI on the Padlet-style layouts, in the toolbar rather than
+  // a floating button (the owner's PATCH-300 decision: floating buttons covered
+  // those layouts' top-right controls). Freeform keeps its floating button and
+  // Kanban keeps its rail button; a guest has no AI at all.
+  const isPadletBoardAiLayout = isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout || isMapLayout;
+  const showBoardAiTool = enableBoardAiChat && !isGuest && isPadletBoardAiLayout;
+
   return [
     // Group 1 - Canvas-specific (always visible, priority 1); only rendered when
     // there are canvas-specific tools AND the workspace capability is present.
@@ -212,6 +231,17 @@ export function buildCanvasToolbarGroups({
       label: isMapLayout ? 'Map' : 'Canvas',
       tools: canvasSpecificTools,
       priority: 1,
+      alwaysVisible: true,
+    }] : []),
+    // PATCH-371. Board AI: its own always-visible group. It is a read every
+    // reader may use, so it is NOT gated on board-content authority.
+    ...(showBoardAiTool ? [{
+      id: 'board-ai',
+      label: 'AI',
+      tools: [
+        { icon: Sparkles, label: 'Board AI', color: 'text-purple-600', bg: 'hover:bg-purple-50', type: 'board-ai' },
+      ],
+      priority: 3,
       alwaysVisible: true,
     }] : []),
     // Group 2 - Create (always visible, priority 2); AI is always first.

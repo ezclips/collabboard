@@ -314,6 +314,7 @@ export default function RowColumnContainerCard({
     <div
       ref={containerMeasureRef}
       data-post-card-id={padlet.id}
+      data-post-card-shell="true"
       className={isContentOnly ? `w-full space-y-2 ${className || ""}` : `w-full space-y-2 p-1.5 ${className || ""}`}
       style={{
         ...(isContentOnly ? {} : { backgroundColor }),

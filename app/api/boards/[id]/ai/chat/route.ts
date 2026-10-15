@@ -192,6 +192,11 @@ const contextItemSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('kanban-board'),
   }).strict(),
+  // PATCH-371. The Padlet-style whole-board overview (Wall/Columns/Grid/
+  // Timeline/Map): no fields at all, added per turn, read by the server.
+  z.object({
+    type: z.literal('padlet-board'),
+  }).strict(),
 ]);
 
 const chatRequestSchema = z.object({

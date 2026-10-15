@@ -333,6 +333,7 @@ export default function ColumnsCanvasRow({
           const card = isContainer ? (
             <div
               data-post-id={post.id}
+              data-post-card-shell="true"
               data-container-id={post.id}
               onDragOver={(e) => {
                 if (!isEditable) return;
@@ -430,7 +431,7 @@ export default function ColumnsCanvasRow({
               </ColumnPostContextMenu>
             </div>
           ) : (
-            <div data-post-id={post.id}>
+            <div data-post-id={post.id} data-post-card-shell="true">
               <ColumnPostContextMenu
                 padlet={post}
                 onSelect={() => {}}

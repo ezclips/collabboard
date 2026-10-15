@@ -174,6 +174,13 @@ export interface BoardAiChatDrawerProps {
     readonly transcriptStartMs?: number;
     readonly videoIdentity?: string;
   }) => void;
+  /**
+   * PATCH-371. A cited BOARD POST, opened by the host on the Padlet-style
+   * layouts. HOST-GATED: a `padlet` citation is only a clickable chip where this
+   * is supplied, so Freeform's citation behaviour is unchanged. Identity only --
+   * the host scrolls the board to that post.
+   */
+  readonly onOpenPostCitation?: (padletId: string) => void;
   readonly canSaveAssistantAsNote?: boolean;
   readonly onSaveAssistantAsNote?: (request: BoardAiAssistantNoteSaveRequest) => Promise<void>;
   /**
@@ -259,7 +266,10 @@ const EMPTY_AUTO_CONTEXT: readonly BoardAiContextRequestItem[] = [];
  * fallback keeps a future type legible rather than blank.
  */
 function boardAiAutoContextLabel(request: BoardAiContextRequestItem): string {
-  return request.type === 'kanban-board' ? 'Kanban board' : request.type;
+  if (request.type === 'kanban-board') return 'Kanban board';
+  // PATCH-371. The Padlet-style overview's friendly name, not its raw type.
+  if (request.type === 'padlet-board') return 'Board overview';
+  return request.type;
 }
 
 /** A stable empty default, so an uncited answer is not a new array each render. */
@@ -449,6 +459,7 @@ export default function BoardAiChatDrawer({
   documentSessions: controlledDocumentSessions,
   onDocumentSessionsChange,
   onOpenCitation,
+  onOpenPostCitation,
   canSaveAssistantAsNote = false,
   onSaveAssistantAsNote,
   canSaveAssistantAsCard = false,
@@ -1851,9 +1862,19 @@ export default function BoardAiChatDrawer({
                       const citedWikiPageId = item.type === 'wiki-page' ? item.wikiPageId : undefined;
                       // PATCH-322/323. A Kanban card citation opens the card.
                       const citedCardId = item.type === 'kanban-card' ? item.cardId : undefined;
+                      // PATCH-371. A board POST citation opens the post -- but
+                      // only where the host supplied the opener, so a layout
+                      // that cannot scroll to a post keeps a plain label.
+                      const citedPostId = item.type === 'padlet' ? item.padletId : undefined;
                       // A citation is openable if it names a document, a wiki
-                      // page or a card, and the surface was given an opener.
-                      const openable = Boolean(citedDocumentId || citedWikiPageId || citedCardId);
+                      // page or a card, and the surface was given an opener; a
+                      // post needs the host's own opener.
+                      const openable = Boolean(
+                        citedDocumentId
+                        || citedWikiPageId
+                        || citedCardId
+                        || (citedPostId && onOpenPostCitation),
+                      );
                       const chipClass = 'inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] leading-none';
                       // THE SOURCE IS GONE. The citation itself is untouched --
                       // it says what the answer used, which is still true --
@@ -1874,7 +1895,10 @@ export default function BoardAiChatDrawer({
                           </span>
                         );
                       }
-                      if (!onOpenCitation || !openable) {
+                      // The surface can navigate at all: the document/wiki/card
+                      // opener, or -- for a board post -- the host's own opener.
+                      const hasOpener = Boolean(onOpenCitation) || Boolean(citedPostId && onOpenPostCitation);
+                      if (!hasOpener || !openable) {
                         return (
                           <span
                             key={citationKey}
@@ -1895,6 +1919,7 @@ export default function BoardAiChatDrawer({
                           data-board-ai-chat-citation-document={citedDocumentId ?? ''}
                           data-board-ai-chat-citation-wiki-page={citedWikiPageId ?? ''}
                           data-board-ai-chat-citation-card={citedCardId ?? ''}
+                          data-board-ai-chat-citation-post={citedPostId ?? ''}
                           data-board-ai-chat-citation-page={item.pageNumber ?? ''}
                           data-board-ai-chat-citation-range={
                             item.charStart !== undefined && item.charEnd !== undefined
@@ -1912,7 +1937,11 @@ export default function BoardAiChatDrawer({
                               : `Play ${citationLabel} from ${citationMoment}`
                           }
                           className={`${chipClass} border-gray-200 text-blue-700 transition hover:border-blue-200 hover:bg-blue-50`}
-                          onClick={() => { void openCitation({
+                          onClick={() => {
+                            // PATCH-371. A board POST citation is the host's own
+                            // scroll-to-post, not the document/wiki/card opener.
+                            if (citedPostId && onOpenPostCitation) { onOpenPostCitation(citedPostId); return; }
+                            void openCitation({
                             ...(citedDocumentId ? { knowledgeDocumentId: citedDocumentId } : {}),
                             // PATCH-196. A wiki citation names a page, not a
                             // document; the host opens the wiki drawer at it.
