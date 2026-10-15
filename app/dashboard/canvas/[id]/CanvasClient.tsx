@@ -130,6 +130,7 @@ import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFr
 import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
 import PendingPostsPill from '@/components/collabboard/canvas/ui/PendingPostsPill';
 import { isPendingApproval, pendingCount } from '@/lib/domain/canvas/postApproval';
+import { commentAuthorName } from '@/lib/domain/presence/guestAlias';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
   type KnowledgePdfAreaPlacementAttachment,
@@ -7211,6 +7212,11 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const { hideGuestNames } = useBoardGuestSettings(canvasId);
   const boardPresence = useBoardPresence(canvasId ?? null, user ?? null, hideGuestNames);
 
+  // PATCH-370. ONE comment-author name for every comment writer in this file and
+  // in CanvasModals. A guest is never stored as "You"/"User"/"Anonymous", and
+  // Hide guest names is applied here too.
+  const commentAuthor = useMemo(() => commentAuthorName(user, { hideGuestNames }), [user, hideGuestNames]);
+
   // Live chip data: one read per board load, refreshed on focus and every 60 s.
   const kanbanLinks = useMemo<KanbanLinkRef[]>(() => {
     const links: KanbanLinkRef[] = [];
@@ -9788,6 +9794,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           setViewDrawingPadlet={setViewDrawingPadlet}
           imageEditorTab={imageEditorTab}
           user={user}
+          commentAuthor={commentAuthor}
           canvasLayout={canvas?.layout}
           canvasId={canvasId}
           commentAccessMode={commentAccessMode}
@@ -10568,7 +10575,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                 onReorderPost={handleColumnReorder}
                 onDropDraftIntoContainer={handleDropDraftIntoContainer}
                 currentUserId={user?.id}
-                currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                currentUserName={commentAuthor}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 onUpdateChildComments={async (childId, comments, options) => {
                   const field = options?.field ?? 'comments';
@@ -10593,6 +10600,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   ));
                 }}
                 commentAccessMode={commentAccessMode}
+                canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                onApproveGuestPost={approveGuestPostNow}
+                onDeclineGuestPost={deletePadletById}
               />
             )}
 
@@ -10656,7 +10666,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     onPin={pinPost}
                     onReport={reportPost}
                     currentUserId={user?.id}
-                    currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                    currentUserName={commentAuthor}
                     currentUserAvatar={user?.user_metadata?.avatar_url}
                     onUpdateChildComments={async (childId, comments, options) => {
                       const field = options?.field ?? 'comments';
@@ -10681,6 +10691,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                       ));
                     }}
                     commentAccessMode={commentAccessMode}
+                    canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                    onApproveGuestPost={approveGuestPostNow}
+                    onDeclineGuestPost={deletePadletById}
                   />
                 </div>
               </div>
@@ -10747,7 +10760,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                 onPadletCreate={handleCreateEmptyWallContainer}
                 onReorder={handleWallReorder}
                 currentUserId={user?.id}
-                currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                currentUserName={commentAuthor}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 onUpdateChildComments={async (childId, comments, options) => {
                   const field = options?.field ?? 'comments';
@@ -10772,6 +10785,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   ));
                 }}
                 commentAccessMode={commentAccessMode}
+                canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                onApproveGuestPost={approveGuestPostNow}
+                onDeclineGuestPost={deletePadletById}
               />
             )}
 
@@ -10797,7 +10813,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                 drawingExcalidrawAPIRef={drawingExcalidrawAPIRef}
                 onDrawingViewportChange={setDrawingViewport}
                 currentUserId={user?.id}
-                currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                currentUserName={commentAuthor}
                 currentUserAvatar={user?.user_metadata?.avatar_url}
                 viewportContainerRef={containerRef}
                 onPadletEdit={(padlet) => {
@@ -10889,7 +10905,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                     }
                   }) : undefined}
                   currentUserId={user?.id}
-                  currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
+                  currentUserName={commentAuthor}
                   currentUserAvatar={user?.user_metadata?.avatar_url}
                   onUpdateChildComments={canUseFreeformEditButton ? (async (childId, comments, options) => {
                     const field = options?.field ?? 'comments';
@@ -10923,6 +10939,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   onDropLibraryCreateContainer={canUseFreeformEditButton ? handleDropLibraryCreateContainer : undefined}
                   onDropDraftIntoContainer={canUseFreeformEditButton ? handleDropDraftIntoContainer : undefined}
                   commentAccessMode={commentAccessMode}
+                  canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                  onApproveGuestPost={approveGuestPostNow}
+                  onDeclineGuestPost={deletePadletById}
                 />
               </div>
             )}
@@ -11009,7 +11028,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   isSidebarOpen={isMapSidebarOpen}
                   onSidebarClose={handleMapSidebarClose}
                   currentUserId={user?.id}
-                  currentUserName={user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User'}
+                  currentUserName={commentAuthor}
                   currentUserAvatar={user?.user_metadata?.avatar_url}
                   onRefreshChildren={handleMapRefreshChildren}
                   onMapReady={handleMapReady}
@@ -11017,6 +11036,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   onLineContextMenu={handleLineContextMenu}
                   onToggleEditMode={handleToggleLineEditMode}
                   commentAccessMode={commentAccessMode}
+                  canApproveGuestPosts={isBoardOwner(user?.id, canvasId, canvas)}
+                  onApproveGuestPost={approveGuestPostNow}
+                  onDeclineGuestPost={deletePadletById}
                   onUpdateChildComments={async (childId, comments, options) => {
                     const field = options?.field ?? 'comments';
                     const nowIso = new Date().toISOString();
@@ -11261,15 +11283,24 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             />
 
             {/* PATCH-367. Owner-only pill: guest posts waiting for approval.
-                Clicking it reveals the oldest waiting post (Freeform reveal). */}
+                PATCH-370. Clicking it reveals the oldest waiting post -- the
+                Freeform reveal on Freeform, a scroll-into-view on the others. */}
             {isBoardOwner(user?.id, canvasId, canvas) ? (
               <PendingPostsPill
                 count={pendingCount(padlets)}
                 onFocus={() => {
                   const oldest = padlets.find((p) => isPendingApproval(p.metadata));
                   if (!oldest) return;
-                  boardRevealRequestIdRef.current += 1;
-                  setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: oldest.id });
+                  if (isFreeformLayout) {
+                    boardRevealRequestIdRef.current += 1;
+                    setBoardRevealRequest({ requestId: boardRevealRequestIdRef.current, targetPadletId: oldest.id });
+                    return;
+                  }
+                  const el = document.querySelector(`[data-post-card-id="${oldest.id}"]`) as HTMLElement | null;
+                  if (!el) return;
+                  el.scrollIntoView({ block: 'center' });
+                  el.style.outline = '2px solid #6366f1';
+                  window.setTimeout(() => { el.style.outline = ''; }, 2000);
                 }}
               />
             ) : null}
@@ -11848,7 +11879,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               }}
               commentAccessMode={commentAccessMode}
               currentUserId={user?.id || 'anon'}
-              currentUserName={user?.email?.split('@')[0] || 'You'}
+              currentUserName={commentAuthor}
             />
 
             {/**
@@ -11997,7 +12028,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                               allPadlets={padlets}
                               onDropDraftIntoContainer={handleDropDraftIntoContainer}
                               currentUserId={user?.id}
-                              currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
+                              currentUserName={commentAuthor}
                               currentUserAvatar={user?.user_metadata?.avatar_url}
                               onUpdateChildComments={async (childId, comments, options) => {
                                 const field = options?.field ?? 'comments';
@@ -12827,7 +12858,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   accessMode={commentAccessMode}
                   comments={cardCommentList}
                   currentUserId={user?.id || 'anon'}
-                  currentUserName={user?.email?.split('@')[0] || 'You'}
+                  currentUserName={commentAuthor}
                 />
               </div>
             )}

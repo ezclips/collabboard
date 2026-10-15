@@ -15,8 +15,9 @@ import { resolveImagePostDisplaySrc } from '@/lib/domain/canvas/imagePostDisplay
 import { resolveCropResetSource } from '@/lib/infra/collabboard/imageDurableContent';
 import { getPostResizeCapability, getPostResizeConstraints, getManualResizeDimensions, isImageManuallySized } from '@/lib/domain/canvas/postResizePolicy';
 import { guestPostStripColor } from '@/lib/domain/presence/boardPresence';
-import { guestAlias } from '@/lib/domain/presence/guestAlias';
-import { PENDING_LABEL, approvedMetadata, isPendingApproval } from '@/lib/domain/canvas/postApproval';
+import { commentAuthorName } from '@/lib/domain/presence/guestAlias';
+import { approvedMetadata, isPendingApproval } from '@/lib/domain/canvas/postApproval';
+import PendingApprovalBar from './PendingApprovalBar';
 import { formatSummary, summarizeColumn } from '@/lib/domain/canvas/tableNumbers';
 import PostResizeHandle from '@/components/collabboard/canvas/ui/PostResizeHandle';
 import { createPostsRepository } from '@/lib/infra/canvas/postsRepository';
@@ -635,15 +636,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     hideGuestNames = false,
   } = props;
   /**
-   * PATCH-368. The author name a NEW comment stores. A guest's own comment
-   * stores the stable alias while Hide guest names is on; every other writer
-   * keeps the name the call site already computed.
-   */
-  const commentAuthorName = React.useCallback((base: string): string => {
-    const isGuest = (user as { is_anonymous?: boolean } | null)?.is_anonymous === true;
-    return hideGuestNames && isGuest && user?.id ? guestAlias(user.id) : base;
-  }, [hideGuestNames, user]);
-  /**
    * PATCH-053: image-reaction writes already ignore a resolved Supabase error
    * but route a rejected builder into their local catch. Preserve both
    * channels while consuming the existing canvas.updatePostFields command.
@@ -1165,9 +1157,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
     commitPadletMeta,
   } = stableActions;
 
-  // PATCH-367. Which pending post's Decline is asking for an inline confirm.
-  const [declineConfirmId, setDeclineConfirmId] = React.useState<string | null>(null);
-
   /**
    * PATCH-367 Addendum 1. Approve a waiting guest post: hand the metadata
    * WITHOUT the `pendingApproval` key to CanvasClient's IMMEDIATE write. It is
@@ -1181,7 +1170,6 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
 
   /** PATCH-367. Decline a waiting guest post: the EXISTING delete path. */
   const declinePendingPost = React.useCallback((padlet: Padlet) => {
-    setDeclineConfirmId(null);
     void deletePadletById(padlet.id);
   }, [deletePadletById]);
 
@@ -2145,7 +2133,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                      userName: commentAuthorName(user, { hideGuestNames }),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...currentComments, newComment];
@@ -2977,7 +2965,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                      userName: commentAuthorName(user, { hideGuestNames }),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...cardCommentList, newComment];
@@ -3434,7 +3422,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                               id: `comment-${Date.now()}`,
                               text: commentText,
                               userId: user?.id || 'anon',
-                              userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                              userName: commentAuthorName(user, { hideGuestNames }),
                               timestamp: Date.now()
                             };
                             const currentComments = padlet.metadata?.comments || [];
@@ -3484,7 +3472,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text,
                       userId: user?.id || 'anon',
-                      userName: commentAuthorName(user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'),
+                      userName: commentAuthorName(user, { hideGuestNames }),
                       userAvatar: user?.user_metadata?.avatar_url,
                       timestamp: Date.now(),
                     };
@@ -4121,68 +4109,13 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
               );
             })()}
 
-            {/* PATCH-367. A guest post waiting for approval: the label, and for
-                the board owner the Approve / Decline controls. */}
+            {/* PATCH-370. The shared pending bar (was inline from PATCH-367). */}
             {pendingApproval ? (
-              <div
-                data-pending-approval="true"
-                data-no-drag="true"
-                onPointerDown={(e) => e.stopPropagation()}
-                className="relative z-30 flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800"
-              >
-                <span>{PENDING_LABEL}</span>
-                {canApproveGuestPosts ? (
-                  <span className="ml-auto flex items-center gap-1">
-                    {declineConfirmId === padlet.id ? (
-                      <>
-                        <span className="text-amber-700">Decline?</span>
-                        <button
-                          type="button"
-                          data-decline-post-confirm="true"
-                          data-no-drag="true"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); declinePendingPost(padlet); }}
-                          className="rounded bg-red-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-red-700"
-                        >
-                          Delete
-                        </button>
-                        <button
-                          type="button"
-                          data-no-drag="true"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); setDeclineConfirmId(null); }}
-                          className="rounded px-2 py-0.5 text-[11px] font-medium text-amber-800 hover:bg-amber-100"
-                        >
-                          Cancel
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          data-approve-post="true"
-                          data-no-drag="true"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); approvePendingPost(padlet); }}
-                          className="rounded bg-emerald-600 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-emerald-700"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          type="button"
-                          data-decline-post="true"
-                          data-no-drag="true"
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => { e.stopPropagation(); setDeclineConfirmId(padlet.id); }}
-                          className="rounded px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50"
-                        >
-                          Decline
-                        </button>
-                      </>
-                    )}
-                  </span>
-                ) : null}
-              </div>
+              <PendingApprovalBar
+                canApprove={canApproveGuestPosts}
+                onApprove={() => approvePendingPost(padlet)}
+                onDecline={() => declinePendingPost(padlet)}
+              />
             ) : null}
 
             {/* Save to Library button (visible on hover) */}
@@ -4624,7 +4557,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   ignoreDragKinds={[DND_KIND_CONTAINER_MOVE]}
                   onViewDrawing={(p) => setViewDrawingPadlet(p)}
                   currentUserId={user?.id}
-                  currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
+                  currentUserName={commentAuthorName(user, { hideGuestNames })}
                   currentUserAvatar={user?.user_metadata?.avatar_url}
                   onUpdateChildComments={async (childId, comments) => {
                     const childPadlet = padlets.find(p => p.id === childId);
@@ -4653,6 +4586,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                     if (destination) requestOpenDocument(child, destination);
                   }}
                   accessMode={commentAccessMode}
+                  // PATCH-370 Addendum 2. This card draws its OWN guest strip
+                  // around a container, so the container must not add a second.
+                  hideGuestStrip
                 />
               )}
 
@@ -4686,6 +4622,9 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                   // in the menu and the click selects like every other post.
                   onView={canUseFreeformEditButton ? undefined : () => setViewDrawingPadlet(padlet)}
                   isDragging={isDragging && draggingPadletId === padlet.id}
+                  // PATCH-370. This card draws its OWN guest strip and pending
+                  // bar, so the shared body must not add a second one.
+                  hideGuestStrip
                 />
               )}
 
@@ -5086,7 +5025,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                          userName: commentAuthorName(user, { hideGuestNames }),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5265,7 +5204,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                          userName: commentAuthorName(user, { hideGuestNames }),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5431,7 +5370,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                           id: `comment-${Date.now()}`,
                           text: commentText,
                           userId: user?.id || 'anon',
-                          userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                          userName: commentAuthorName(user, { hideGuestNames }),
                           timestamp: Date.now(),
                         };
                         const nextComments = [...currentComments, newComment];
@@ -5746,7 +5685,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                         id: `comment-${Date.now()}`,
                         text: commentText,
                         userId: user?.id || 'anon',
-                        userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                        userName: commentAuthorName(user, { hideGuestNames }),
                         timestamp: Date.now(),
                       };
                       const nextComments = [...currentComments, newComment];
@@ -6367,7 +6306,7 @@ function FreeformPadletCards(props: FreeformPadletCardsProps) {
                       id: `comment-${Date.now()}`,
                       text: commentText,
                       userId: user?.id || 'anon',
-                      userName: commentAuthorName(user?.email?.split('@')[0] || 'You'),
+                      userName: commentAuthorName(user, { hideGuestNames }),
                       timestamp: Date.now(),
                     };
                     const nextComments = [...currentComments, newComment];

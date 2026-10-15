@@ -30,6 +30,9 @@ import { knowledgeSourceCardLabel } from "@/lib/domain/knowledge/knowledgeSource
 import { knowledgeSourceCardExcerpt } from "@/lib/domain/knowledge/knowledgeSourceCardExcerpt";
 import { getKnowledgeSourceCardRegionCrop } from "@/lib/domain/knowledge/knowledgeSourceCardRegionCrop";
 import KnowledgeSourceRegionCrop from "./KnowledgeSourceRegionCrop";
+import { approvedMetadata, isPendingApproval } from "@/lib/domain/canvas/postApproval";
+import { guestPostStripColor } from "@/lib/domain/presence/boardPresence";
+import PendingApprovalBar from "./canvas/ui/PendingApprovalBar";
 
 type CellStyle = {
     bg?: string;
@@ -65,6 +68,15 @@ interface PostCardContentProps {
     // onClick must not fire (opening the viewer) when the click is really
     // the tail end of a drag the user just performed on this card.
     isDragging?: boolean;
+    // PATCH-370. Guest features on every Padlet-style layout. When a pending
+    // guest post is rendered and the approve callbacks are supplied, a
+    // PendingApprovalBar sits at the top of the content (the author gets the
+    // label only -- canApprove false). The guest-colour band is suppressed by
+    // FreeformPadletCards, which draws its own strip.
+    canApproveGuestPosts?: boolean;
+    onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+    onDeclineGuestPost?: (padletId: string) => void;
+    hideGuestStrip?: boolean;
 }
 
 // Decode HTML entities that may have been escaped
@@ -271,7 +283,41 @@ function ClipartCardContent({
     );
 }
 
-export default function PostCardContent({
+export default function PostCardContent(props: PostCardContentProps) {
+    const { padlet, hideGuestStrip = false, canApproveGuestPosts = false, onApproveGuestPost, onDeclineGuestPost } = props;
+    const stripColor = hideGuestStrip ? null : guestPostStripColor(padlet.metadata);
+    const pending = isPendingApproval(padlet.metadata);
+    const showBar = pending && typeof onApproveGuestPost === 'function';
+
+    return (
+        <div
+            data-post-card-id={padlet.id}
+            style={{
+                outline: pending ? '2px dashed #f59e0b' : undefined,
+                outlineOffset: pending ? '-2px' : undefined,
+            }}
+        >
+            {stripColor ? (
+                <div
+                    data-guest-strip="true"
+                    title="Added by a guest"
+                    className="w-full shrink-0"
+                    style={{ height: 4, backgroundColor: stripColor }}
+                />
+            ) : null}
+            {showBar ? (
+                <PendingApprovalBar
+                    canApprove={canApproveGuestPosts}
+                    onApprove={() => onApproveGuestPost?.(padlet.id, approvedMetadata(padlet.metadata as Record<string, unknown> | null | undefined))}
+                    onDecline={() => onDeclineGuestPost?.(padlet.id)}
+                />
+            ) : null}
+            <PostCardContentBody {...props} />
+        </div>
+    );
+}
+
+function PostCardContentBody({
     padlet,
     allPadlets = [],
     onScan,

@@ -133,6 +133,10 @@ type MapCanvasProps = {
   // to 'manage' so any pre-existing caller (tests, previews) keeps today's
   // behavior unchanged.
   commentAccessMode?: CommentAccessMode;
+  // PATCH-370. Guest features for pending posts; forwarded to PostPopup.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 };
 
 function MapCanvas({
@@ -171,6 +175,9 @@ function MapCanvas({
   onLineContextMenu,
   onToggleEditMode,
   commentAccessMode = 'manage',
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }: MapCanvasProps) {
   const mapRef = useRef<MapRef | null>(null);
   // Timestamp-based double-click detector for passive map lines.
@@ -824,6 +831,9 @@ function MapCanvas({
                       onUpdateChildComments={onUpdateChildComments}
                       onRefreshChildren={onRefreshChildren}
                       accessMode={commentAccessMode}
+                      canApproveGuestPosts={canApproveGuestPosts}
+                      onApproveGuestPost={onApproveGuestPost}
+                      onDeclineGuestPost={onDeclineGuestPost}
                     />
                   </div>
                 ) : null}

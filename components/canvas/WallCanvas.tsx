@@ -68,6 +68,10 @@ interface WallCanvasProps {
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   commentAccessMode?: CommentAccessMode;
+  // PATCH-370. Guest features for pending child posts; forwarded to PostCardContent.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 }
 
 interface SortablePadletProps {
@@ -95,6 +99,9 @@ interface SortablePadletProps {
   commentAccessMode?: CommentAccessMode;
   onOpenDocument?: (padlet: Padlet) => void;
   onViewDrawing?: (padlet: Padlet) => void;
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 }
 
 
@@ -122,6 +129,9 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
   commentAccessMode,
   onOpenDocument,
   onViewDrawing,
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }) => {
   // Label for the open-target submenu -- prefers the child's own title (set
   // via getContainerEditTargetLabel) so a container holding many same-typed
@@ -214,6 +224,9 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
                 accessMode={commentAccessMode}
                 onOpenDocument={onOpenDocument}
                 onViewDrawing={onViewDrawing}
+                canApproveGuestPosts={canApproveGuestPosts}
+                onApproveGuestPost={onApproveGuestPost}
+                onDeclineGuestPost={onDeclineGuestPost}
               />
             </CardShell>
           </div>
@@ -252,6 +265,9 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   commentAccessMode,
   onOpenDocument,
   onViewDrawing,
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }) => {
   // Cookie-authenticated client — see useCanvasData.ts for why this must match
   // supabaseBrowser() rather than the plain lib/supabase.ts singleton.
@@ -737,6 +753,9 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
                                 commentAccessMode={commentAccessMode}
                                 onOpenDocument={onOpenDocument}
                                 onViewDrawing={onViewDrawing}
+                                canApproveGuestPosts={canApproveGuestPosts}
+                                onApproveGuestPost={onApproveGuestPost}
+                                onDeclineGuestPost={onDeclineGuestPost}
                               />
                             )}
                           </div>
@@ -761,6 +780,9 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
                       <PostCardContent
                         padlet={post}
                         allPadlets={completePadletSet}
+                        canApproveGuestPosts={canApproveGuestPosts}
+                        onApproveGuestPost={onApproveGuestPost}
+                        onDeclineGuestPost={onDeclineGuestPost}
                       />
                     </div>
                   );

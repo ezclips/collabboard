@@ -96,6 +96,10 @@ type ColumnsLayoutProps = {
   currentUserAvatar?: string;
   onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
   commentAccessMode?: CommentAccessMode;
+  // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 };
 
 function DraggablePostItem({
@@ -186,6 +190,9 @@ export default function ColumnsCanvasRow({
   currentUserAvatar,
   onUpdateChildComments,
   commentAccessMode,
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }: ColumnsLayoutProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editingTitle, setEditingTitle] = useState(section?.title ?? "");
@@ -415,6 +422,9 @@ export default function ColumnsCanvasRow({
                     isContentOnly
                     onOpenDocument={onOpenDocument}
                     onViewDrawing={onViewDrawing}
+                    canApproveGuestPosts={canApproveGuestPosts}
+                    onApproveGuestPost={onApproveGuestPost}
+                    onDeclineGuestPost={onDeclineGuestPost}
                   />
                 </CardShell>
               </ColumnPostContextMenu>
@@ -478,6 +488,9 @@ export default function ColumnsCanvasRow({
                         allPadlets={allPadlets}
                         onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined}
                         hideOwnTitle={hasTitle}
+                        canApproveGuestPosts={canApproveGuestPosts}
+                        onApproveGuestPost={onApproveGuestPost}
+                        onDeclineGuestPost={onDeclineGuestPost}
                       />
                     </CardShell>
                   );

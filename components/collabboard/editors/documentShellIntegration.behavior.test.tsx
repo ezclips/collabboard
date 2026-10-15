@@ -312,7 +312,7 @@ describe('OQ-2: authenticated identity reaches CommentPopup through DocumentEdit
     const src = fs.readFileSync('components/collabboard/canvas/ui/CanvasModals.tsx', 'utf8');
     expect(src).toContain('readOnly={documentModalDestination === \'document-viewer\'}');
     expect(src).toContain('currentUserId={user?.id}');
-    expect(src).toContain("currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}");
+    expect(src).toContain("currentUserName={commentAuthor}");
   });
 });
 

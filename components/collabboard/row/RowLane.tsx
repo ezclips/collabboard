@@ -121,6 +121,10 @@ interface RowLaneProps {
     commentAccessMode?: CommentAccessMode;
     onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void | Promise<void>;
     onAddEmptyContainerAt?: (position: number) => void;
+    // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+    canApproveGuestPosts?: boolean;
+    onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+    onDeclineGuestPost?: (padletId: string) => void;
 }
 
 export default function RowLane({
@@ -164,6 +168,9 @@ export default function RowLane({
     commentAccessMode,
     onDropDraftIntoContainer,
     onAddEmptyContainerAt,
+    canApproveGuestPosts,
+    onApproveGuestPost,
+    onDeclineGuestPost,
 }: RowLaneProps) {
     // Helper to get container children for the openTargets submenu
     const getContainerChildren = (containerId: string): Padlet[] => {
@@ -483,6 +490,9 @@ export default function RowLane({
                                                         isContentOnly
                                                         onOpenDocument={onOpenDocument}
                                                         onViewDrawing={onViewDrawing}
+                                                        canApproveGuestPosts={canApproveGuestPosts}
+                                                        onApproveGuestPost={onApproveGuestPost}
+                                                        onDeclineGuestPost={onDeclineGuestPost}
                                                     />
                                                 </CardShell>
                                             </ColumnPostContextMenu>
@@ -534,7 +544,7 @@ export default function RowLane({
                                                         className="cursor-grab active:cursor-grabbing"
                                                     >
                                                         <div className="text-base text-gray-800 whitespace-pre-line break-words select-text w-full overflow-hidden">
-                                                            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} hideOwnTitle={hasTitle} />
+                                                            <PostCardContent padlet={post} allPadlets={allPadlets} canApproveGuestPosts={canApproveGuestPosts} onApproveGuestPost={onApproveGuestPost} onDeclineGuestPost={onDeclineGuestPost} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} hideOwnTitle={hasTitle} />
                                                         </div>
                                                     </CardShell>
                                                 );

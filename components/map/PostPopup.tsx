@@ -36,6 +36,10 @@ type PostPopupProps = {
   // behavior unchanged -- the live caller (MapCanvas.tsx) always supplies
   // the real value explicitly.
   accessMode?: CommentAccessMode;
+  // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 };
 
 export default function PostPopup({
@@ -58,6 +62,9 @@ export default function PostPopup({
   onUpdateChildComments,
   onRefreshChildren,
   accessMode = 'manage',
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }: PostPopupProps) {
 
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -183,13 +190,16 @@ export default function PostPopup({
             onOpenDocument={onOpenDocument}
             onViewDrawing={onViewDrawing}
             accessMode={accessMode}
+            canApproveGuestPosts={canApproveGuestPosts}
+            onApproveGuestPost={onApproveGuestPost}
+            onDeclineGuestPost={onDeclineGuestPost}
           />
           </div>
         </div>
       ) : (
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="mt-2">
-            <PostCardContent padlet={post} allPadlets={allPadlets} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} accessMode={accessMode} />
+            <PostCardContent padlet={post} allPadlets={allPadlets} canApproveGuestPosts={canApproveGuestPosts} onApproveGuestPost={onApproveGuestPost} onDeclineGuestPost={onDeclineGuestPost} onOpenDocument={onOpenDocument ? () => onOpenDocument(post) : undefined} accessMode={accessMode} />
           </div>
         </div>
       )}

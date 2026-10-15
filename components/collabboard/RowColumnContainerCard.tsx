@@ -5,6 +5,9 @@ import React, { useEffect, useRef, useState } from "react";
 import { MessageCircle } from "lucide-react";
 
 import PostCardContent from "./PostCardContent";
+import PendingApprovalBar from "./canvas/ui/PendingApprovalBar";
+import { approvedMetadata, isPendingApproval } from "@/lib/domain/canvas/postApproval";
+import { guestPostStripColor } from "@/lib/domain/presence/boardPresence";
 import CardPreview from "./CardPreview";
 import EmbeddedCommentList from "./EmbeddedCommentList";
 import type { Padlet } from "@/types/collabboard";
@@ -81,6 +84,16 @@ type RowColumnContainerCardProps = {
   // manual-resize handle's minimum -- see the effect below for why
   // `onRequiredWidthChange` (frozen for auto-grow) cannot be reused here.
   onIntrinsicRequiredWidthChange?: (width: number) => void;
+  // PATCH-370. Guest features for a pending child post (Wall/Columns/Grid/
+  // Timeline/Map containers): passed straight to PostCardContent.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
+  /**
+   * PATCH-370 Addendum 2. FreeformPadletCards draws a container's OWN guest
+   * strip around this card, so it opts out here to avoid a second band.
+   */
+  hideGuestStrip?: boolean;
 };
 
 export default function RowColumnContainerCard({
@@ -110,6 +123,10 @@ export default function RowColumnContainerCard({
   orientation = 'vertical',
   onRequiredWidthChange,
   onIntrinsicRequiredWidthChange,
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
+  hideGuestStrip = false,
 }: RowColumnContainerCardProps) {
   const COLLAPSED_SCROLL_MAX_HEIGHT = 300;
   const [localIsExpanded, setLocalIsExpanded] = useState(false);
@@ -285,12 +302,40 @@ export default function RowColumnContainerCard({
   }, [childPadlets, isHorizontal, onIntrinsicRequiredWidthChange]);
 
 
+  // PATCH-370 Addendum 2. The container's OWN padlet never passes through
+  // PostCardContent (only its children do), so a pending/guest container gets
+  // the same treatment here. The bar needs the approve callback; the band is
+  // suppressed by hideGuestStrip (Freeform draws its own).
+  const containerPending = isPendingApproval(padlet.metadata);
+  const containerStripColor = hideGuestStrip ? null : guestPostStripColor(padlet.metadata);
+  const showContainerBar = containerPending && typeof onApproveGuestPost === 'function';
+
   return (
     <div
       ref={containerMeasureRef}
+      data-post-card-id={padlet.id}
       className={isContentOnly ? `w-full space-y-2 ${className || ""}` : `w-full space-y-2 p-1.5 ${className || ""}`}
-      style={isContentOnly ? undefined : { backgroundColor }}
+      style={{
+        ...(isContentOnly ? {} : { backgroundColor }),
+        outline: containerPending ? '2px dashed #f59e0b' : undefined,
+        outlineOffset: containerPending ? '-2px' : undefined,
+      }}
     >
+      {containerStripColor ? (
+        <div
+          data-guest-strip="true"
+          title="Added by a guest"
+          className="w-full shrink-0"
+          style={{ height: 4, backgroundColor: containerStripColor }}
+        />
+      ) : null}
+      {showContainerBar ? (
+        <PendingApprovalBar
+          canApprove={canApproveGuestPosts === true}
+          onApprove={() => onApproveGuestPost?.(padlet.id, approvedMetadata(padlet.metadata as Record<string, unknown> | null | undefined))}
+          onDecline={() => onDeclineGuestPost?.(padlet.id)}
+        />
+      ) : null}
       <div>
         {showHeader && !isContentOnly && (
           <div className="flex items-center justify-center relative mb-2">
@@ -608,6 +653,9 @@ export default function RowColumnContainerCard({
                             onUpdateChildComments={onUpdateChildComments}
                             onOpenDocument={onOpenDocument ? () => onOpenDocument(child) : undefined}
                             accessMode={accessMode}
+                            canApproveGuestPosts={canApproveGuestPosts}
+                            onApproveGuestPost={onApproveGuestPost}
+                            onDeclineGuestPost={onDeclineGuestPost}
                           />
                         )}
                       </div>

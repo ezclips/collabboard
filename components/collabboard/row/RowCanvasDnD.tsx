@@ -77,6 +77,10 @@ export interface RowCanvasDnDProps {
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
     commentAccessMode?: CommentAccessMode;
     onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void | Promise<void>;
+    // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+    canApproveGuestPosts?: boolean;
+    onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+    onDeclineGuestPost?: (padletId: string) => void;
 }
 
 export default function RowCanvasDnD({
@@ -120,6 +124,9 @@ export default function RowCanvasDnD({
     onUpdateChildComments,
     commentAccessMode,
     onDropDraftIntoContainer,
+    canApproveGuestPosts,
+    onApproveGuestPost,
+    onDeclineGuestPost,
 }: RowCanvasDnDProps) {
     const [activeId, setActiveId] = useState<string | null>(null);
     const [dropIndicator, setDropIndicator] = useState<DropIndicatorState>({ sectionId: null, index: null });
@@ -383,6 +390,9 @@ export default function RowCanvasDnD({
                     onUpdateChildComments={onUpdateChildComments}
                     commentAccessMode={commentAccessMode}
                     onDropDraftIntoContainer={onDropDraftIntoContainer}
+                    canApproveGuestPosts={canApproveGuestPosts}
+                    onApproveGuestPost={onApproveGuestPost}
+                    onDeclineGuestPost={onDeclineGuestPost}
                 />
                     </DroppableLaneWrapper>
                 ))}
@@ -402,7 +412,7 @@ export default function RowCanvasDnD({
                             // Re-use PostCardContent logic or simplified view
                             return (
                                 <div className="w-[280px] h-[160px] bg-white rounded-2xl shadow-2xl border border-gray-300 p-4 overflow-hidden">
-                                    <PostCardContent padlet={p} allPadlets={allPadlets} />
+                                    <PostCardContent padlet={p} allPadlets={allPadlets} canApproveGuestPosts={canApproveGuestPosts} onApproveGuestPost={onApproveGuestPost} onDeclineGuestPost={onDeclineGuestPost} />
                                 </div>
                             )
                         })()}

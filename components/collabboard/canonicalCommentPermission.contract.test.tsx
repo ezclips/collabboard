@@ -359,7 +359,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
     it('CanvasClient.tsx passes the real authenticated user into ClipartCardDraftModal, not a hardcoded literal', () => {
       const canvas = read(CANVAS_PATH);
       expect(canvas).toContain("currentUserId={user?.id || 'anon'}");
-      expect(canvas).toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(canvas).toContain("currentUserName={commentAuthor}");
     });
   });
 
@@ -601,7 +601,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
       const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
       expect(noteEditorBlock).toContain("currentUserId={user?.id || 'anon'}");
-      expect(noteEditorBlock).toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(noteEditorBlock).toContain("currentUserName={commentAuthor}");
       expect(noteEditorBlock).toContain('initialCommentTitle=');
       expect(noteEditorBlock).toContain('initialCommentTitleStyle=');
     });
@@ -707,7 +707,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const todoEditorBlock = canvasModals.slice(todoEditorStart, todoEditorEnd);
       expect(todoEditorBlock).toContain('accessMode={commentAccessMode}');
       expect(todoEditorBlock).toContain("currentUserId={user?.id || 'anon'}");
-      expect(todoEditorBlock).toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(todoEditorBlock).toContain("currentUserName={commentAuthor}");
       expect(canvasModals).toContain('commentTitle: typeof padletToEdit.metadata.commentTitle');
       expect(canvasModals).toContain('commentTitleStyle: padletToEdit.metadata.commentTitleStyle');
     });
@@ -798,7 +798,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
         const block = canvasModals.slice(start, end);
         expect(block, 'each DrawingEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
         expect(block, 'each DrawingEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
-        expect(block, 'each DrawingEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+        expect(block, 'each DrawingEditor instance must pass real currentUserName').toContain("currentUserName={commentAuthor}");
         expect(block, 'each DrawingEditor instance must pass initialMetadata so comments/title actually load').toContain('initialMetadata=');
       }
     });
@@ -872,7 +872,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const block = canvasModals.slice(start, end);
       expect(block, 'AIComponentEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
       expect(block, 'AIComponentEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
-      expect(block, 'AIComponentEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(block, 'AIComponentEditor instance must pass real currentUserName').toContain("currentUserName={commentAuthor}");
       expect(block, 'AIComponentEditor instance must pass initialMetadata so comments/title actually load').toContain('initialMetadata=');
     });
   });
@@ -993,7 +993,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const block = canvasModals.slice(start, end);
       expect(block, 'LinkEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
       expect(block, 'LinkEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
-      expect(block, 'LinkEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(block, 'LinkEditor instance must pass real currentUserName').toContain("currentUserName={commentAuthor}");
       expect(canvasModals).toContain('commentTitle: typeof padletToEdit.metadata.commentTitle');
       expect(canvasModals).toContain('commentTitleStyle: padletToEdit.metadata.commentTitleStyle');
     });
@@ -1127,7 +1127,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const block = canvasModals.slice(start, end);
       expect(block, 'TableEditor instance must pass accessMode={commentAccessMode}').toContain('accessMode={commentAccessMode}');
       expect(block, 'TableEditor instance must pass real currentUserId').toContain("currentUserId={user?.id || 'anon'}");
-      expect(block, 'TableEditor instance must pass real currentUserName').toContain("currentUserName={user?.email?.split('@')[0] || 'You'}");
+      expect(block, 'TableEditor instance must pass real currentUserName').toContain("currentUserName={commentAuthor}");
     });
   });
 
@@ -1384,7 +1384,7 @@ describe('PATCH 8O.1/8O.2 -- canonical comment permission wiring', () => {
       const noteEditorEnd = canvasModals.indexOf('/>', canvasModals.indexOf('initialTitle=', noteEditorStart));
       const noteEditorBlock = canvasModals.slice(noteEditorStart, noteEditorEnd);
       expect(noteEditorBlock).toContain('currentUserId={user?.id || \'anon\'}');
-      expect(noteEditorBlock).toContain('currentUserName={user?.email?.split(\'@\')[0] || \'You\'}');
+      expect(noteEditorBlock).toContain('currentUserName={commentAuthor}');
     });
 
     it('OverlayLayer extends the same READ/MANAGE gate to Note padlets, distinguishable from the Document branch', () => {

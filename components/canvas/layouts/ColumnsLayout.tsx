@@ -81,6 +81,10 @@ interface ColumnsLayoutProps {
     currentUserAvatar?: string;
     onUpdateChildComments?: (childId: string, comments: any[], options?: { field?: 'comments' | 'detachedComments' }) => void;
     commentAccessMode?: CommentAccessMode;
+    // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+    canApproveGuestPosts?: boolean;
+    onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+    onDeclineGuestPost?: (padletId: string) => void;
 }
 
 const customDropAnimation: DropAnimation = {
@@ -145,6 +149,9 @@ export default function ColumnsLayout({
     currentUserAvatar,
     onUpdateChildComments,
     commentAccessMode,
+    canApproveGuestPosts,
+    onApproveGuestPost,
+    onDeclineGuestPost,
 }: ColumnsLayoutProps) {
     const [activeDragId, setActiveDragId] = useState<string | null>(null);
     const [dropIndicator, setDropIndicator] = useState<DropIndicatorState>({
@@ -475,6 +482,9 @@ export default function ColumnsLayout({
                                     currentUserAvatar={currentUserAvatar}
                                     onUpdateChildComments={onUpdateChildComments}
                                     commentAccessMode={commentAccessMode}
+                                    canApproveGuestPosts={canApproveGuestPosts}
+                                    onApproveGuestPost={onApproveGuestPost}
+                                    onDeclineGuestPost={onDeclineGuestPost}
                                 />
                             </div>
                         ))}
@@ -502,6 +512,9 @@ export default function ColumnsLayout({
                                             <PostCardContent
                                                 padlet={post}
                                                 allPadlets={allPadlets}
+                                                canApproveGuestPosts={canApproveGuestPosts}
+                                                onApproveGuestPost={onApproveGuestPost}
+                                                onDeclineGuestPost={onDeclineGuestPost}
                                             />
                                         </div>
                                     );

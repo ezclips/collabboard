@@ -87,6 +87,9 @@ export interface CanvasModalsProps {
   setViewDrawingPadlet: (p: Padlet | null) => void;
   imageEditorTab: string;
   user: AuthUser | null;
+  // PATCH-370. CanvasClient's ONE comment-author name (guest alias / registered
+  // name / never "You"), so every comment written from these editors stores it.
+  commentAuthor?: string;
   canvasLayout: string | undefined;
   canvasId: string | undefined;
   /**
@@ -156,6 +159,7 @@ export default function CanvasModals({
   viewDrawingPadlet, setViewDrawingPadlet,
   imageEditorTab,
   user,
+  commentAuthor,
   canvasLayout, canvasId,
   onImportAsDocument,
   commentAccessMode = 'manage',
@@ -237,7 +241,7 @@ export default function CanvasModals({
           onSave={documentModalDestination === 'document-editor' ? saveCard : noopDocumentSave}
           onDirtyChange={onDirtyChange}
           currentUserId={user?.id}
-          currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
+          currentUserName={commentAuthor}
           accessMode={commentAccessMode}
           boardId={canvasId}
           onClose={() => {
@@ -267,7 +271,7 @@ export default function CanvasModals({
           initialCommentTitle={typeof padletToEdit?.metadata?.commentTitle === 'string' ? padletToEdit.metadata.commentTitle : undefined}
           initialCommentTitleStyle={padletToEdit?.metadata?.commentTitleStyle as any}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
           sourceReferences={noteSourceReferences}
           onOpenSourceReference={onOpenSourceReference}
           boardId={canvasId}
@@ -305,7 +309,7 @@ export default function CanvasModals({
           onSave={saveLink}
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
         />
       </div>
 
@@ -322,7 +326,7 @@ export default function CanvasModals({
           onSave={saveTable}
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
           boardId={canvasId}
         />
       </div>
@@ -353,7 +357,7 @@ export default function CanvasModals({
           boardId={canvasId}
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
         />
       </div>
 
@@ -472,7 +476,7 @@ export default function CanvasModals({
               }
             }}
             currentUserId={user?.id}
-            currentUserName={user?.user_metadata?.full_name || user?.email || 'Anonymous'}
+            currentUserName={commentAuthor}
             currentUserAvatar={user?.user_metadata?.avatar_url}
             accessMode={commentAccessMode}
           />
@@ -502,7 +506,7 @@ export default function CanvasModals({
           onSave={saveComment}
           accessMode={commentAccessMode}
           currentUserId={user?.id}
-          currentUserName={user?.user_metadata?.name || user?.email?.split('@')[0] || 'Anonymous'}
+          currentUserName={commentAuthor}
           currentUserAvatar={user?.user_metadata?.avatar_url}
         />
       </div>
@@ -565,7 +569,7 @@ export default function CanvasModals({
           readOnly={false}
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
         />
       </div>
 
@@ -592,7 +596,7 @@ export default function CanvasModals({
         readOnly={true}
         accessMode={commentAccessMode}
         currentUserId={user?.id || 'anon'}
-        currentUserName={user?.email?.split('@')[0] || 'You'}
+        currentUserName={commentAuthor}
       />
 
       {/* AI Component Generator / Regenerate Modal */}
@@ -612,7 +616,7 @@ export default function CanvasModals({
           lockedSubtype={lockedSubtype}
           accessMode={commentAccessMode}
           currentUserId={user?.id || 'anon'}
-          currentUserName={user?.email?.split('@')[0] || 'You'}
+          currentUserName={commentAuthor}
           boardId={canvasId}
           onEditAsDrawing={(data) =>
             handleEditAsDrawing(data, undefined, () => setIsAIComponentEditorOpen(false))

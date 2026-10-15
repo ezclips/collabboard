@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { GUEST_ALIAS_SQL, displayNameFor, guestAlias } from './guestAlias';
+import { GUEST_ALIAS_SQL, commentAuthorName, displayNameFor, guestAlias } from './guestAlias';
 
 describe('PATCH-368 guestAlias', () => {
   it('derives a stable number from the first 4 hex chars', () => {
@@ -67,5 +67,46 @@ describe('PATCH-368 displayNameFor', () => {
 
   it('falls back to "Member" when a non-guest has no name', () => {
     expect(displayNameFor({ ...base, name: null, isGuest: false })).toBe('Member');
+  });
+});
+
+describe('PATCH-370 commentAuthorName', () => {
+  const GUEST = { id: 'a1000000-0000-4000-8000-0000000000b1', is_anonymous: true, email: null, user_metadata: { display_name: 'Ada' } };
+  const REGISTERED = { id: 'u1', is_anonymous: false, email: 'ada@example.com', user_metadata: { full_name: 'Ada Lovelace', name: 'Ada' } };
+
+  it('stores the alias for a guest while names are hidden', () => {
+    expect(commentAuthorName(GUEST, { hideGuestNames: true })).toBe('Guest 33');
+  });
+
+  it('stores the guest display name (or "Guest") while not hidden', () => {
+    expect(commentAuthorName(GUEST, { hideGuestNames: false })).toBe('Ada');
+    expect(commentAuthorName({ ...GUEST, user_metadata: {} })).toBe('Guest');
+  });
+
+  it('prefers full_name, then name, then the email prefix for a registered user', () => {
+    expect(commentAuthorName(REGISTERED)).toBe('Ada Lovelace');
+    expect(commentAuthorName({ ...REGISTERED, user_metadata: { name: 'Ada' } })).toBe('Ada');
+    expect(commentAuthorName({ ...REGISTERED, user_metadata: {} })).toBe('ada');
+    expect(commentAuthorName({ id: 'u1', email: 'ada@example.com' })).toBe('ada');
+  });
+
+  it('falls back to "Member" with no metadata at all', () => {
+    expect(commentAuthorName(null)).toBe('Member');
+    expect(commentAuthorName({ id: 'u1' })).toBe('Member');
+  });
+
+  it('never returns the literal "You" for our own fallbacks', () => {
+    const cases = [
+      commentAuthorName(null),
+      commentAuthorName({ id: 'u1' }),
+      commentAuthorName({ id: 'u1', email: 'x@example.com' }),
+      commentAuthorName(GUEST, { hideGuestNames: true }),
+      commentAuthorName({ ...GUEST, user_metadata: {} }),
+      commentAuthorName(REGISTERED),
+      commentAuthorName({ ...REGISTERED, user_metadata: {} }),
+    ];
+    expect(cases).not.toContain('You');
+    expect(cases).not.toContain('User');
+    expect(cases).not.toContain('Anonymous');
   });
 });

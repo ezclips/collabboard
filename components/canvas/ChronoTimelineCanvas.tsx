@@ -52,6 +52,10 @@ interface TimelineCanvasProps {
   onOpenTarget?: (padlet: Padlet) => void;
   onOpenDocument?: (padlet: Padlet) => void; // PATCH-149B1b-iii §27.4
   onViewDrawing?: (padlet: Padlet) => void;
+  // PATCH-370. Guest features for pending posts; forwarded to PostCardContent.
+  canApproveGuestPosts?: boolean;
+  onApproveGuestPost?: (padletId: string, approvedMeta: Record<string, unknown>) => void;
+  onDeclineGuestPost?: (padletId: string) => void;
 }
 
 export default function ChronoTimelineCanvas({
@@ -81,6 +85,9 @@ export default function ChronoTimelineCanvas({
   onOpenTarget,
   onOpenDocument,
   onViewDrawing,
+  canApproveGuestPosts,
+  onApproveGuestPost,
+  onDeclineGuestPost,
 }: TimelineCanvasProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const isDraggingRef = useRef(false);
@@ -553,6 +560,9 @@ export default function ChronoTimelineCanvas({
               isContentOnly
               onOpenDocument={onOpenDocument}
               onViewDrawing={onViewDrawing}
+              canApproveGuestPosts={canApproveGuestPosts}
+              onApproveGuestPost={onApproveGuestPost}
+              onDeclineGuestPost={onDeclineGuestPost}
             />
           </CardShell>
         </div>

@@ -44,3 +44,44 @@ export function displayNameFor(input: DisplayNameInput): string {
 
   return trimmed.length > 0 ? trimmed : 'Member';
 }
+
+/** The fields `commentAuthorName` reads off a user. */
+export interface CommentAuthorUser {
+  readonly id?: string;
+  readonly is_anonymous?: boolean;
+  readonly email?: string | null;
+  readonly user_metadata?: Record<string, unknown> | null;
+}
+
+function firstNonEmptyString(values: readonly unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
+/**
+ * PATCH-370. The name a NEW comment stores. One rule for every comment writer,
+ * so a guest is never stored as "You"/"User"/"Anonymous":
+ *   - a guest: the alias while names are hidden, else their display name, else "Guest";
+ *   - a registered user: full_name, then name, then the email prefix, else "Member".
+ * Never returns the literal "You".
+ */
+export function commentAuthorName(
+  user: CommentAuthorUser | null | undefined,
+  options: { hideGuestNames?: boolean } = {},
+): string {
+  const metadata = (user?.user_metadata ?? {}) as Record<string, unknown>;
+
+  if (user?.is_anonymous === true) {
+    if (options.hideGuestNames) return guestAlias(user.id ?? '');
+    return firstNonEmptyString([metadata.display_name]) ?? 'Guest';
+  }
+
+  const named = firstNonEmptyString([metadata.full_name, metadata.name]);
+  if (named) return named;
+
+  const email = typeof user?.email === 'string' ? user.email : '';
+  const prefix = email.includes('@') ? email.split('@')[0] : email;
+  return prefix.trim().length > 0 ? prefix.trim() : 'Member';
+}
