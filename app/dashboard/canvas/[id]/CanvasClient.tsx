@@ -131,6 +131,10 @@ import BoardPresenceStack from '@/components/collabboard/presence/BoardPresenceS
 import { useBoardFrozen } from '@/components/collabboard/canvas/hooks/useBoardFrozen';
 import FrozenBoardBanner from '@/components/collabboard/canvas/ui/FrozenBoardBanner';
 import PendingPostsPill from '@/components/collabboard/canvas/ui/PendingPostsPill';
+import BoardTimerPill from '@/components/collabboard/facilitation/BoardTimerPill';
+import FacilitatorMenu from '@/components/collabboard/facilitation/FacilitatorMenu';
+import { useBoardFacilitation } from '@/components/collabboard/facilitation/useBoardFacilitation';
+import type { SummonTarget } from '@/lib/domain/facilitation/boardTimer';
 import { isPendingApproval, pendingCount } from '@/lib/domain/canvas/postApproval';
 import { commentAuthorName } from '@/lib/domain/presence/guestAlias';
 import {
@@ -262,7 +266,7 @@ import { getPadletMapLocation } from '@/lib/map/geojson';
 import CanvasSidebar from '@/components/collabboard/canvas/ui/CanvasSidebar';
 import { downloadImportedDocument, ImportAuthError } from '@/lib/imports/clientApi';
 import type { KnowledgePdfUploaderHandle } from '@/components/collabboard/KnowledgePdfUploader';
-import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, WORKSPACE_CANVAS_TOOL_TYPES, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
+import { buildCanvasToolbarGroups, BOARD_CONTENT_TOOL_TYPES, WORKSPACE_CANVAS_TOOL_TYPES, FACILITATION_LAYOUTS, isDirectPdfCanvasLayout } from '@/components/collabboard/canvas/ui/canvasToolbarRegistry';
 import CanvasShareModal from '@/components/collabboard/canvas/ui/CanvasShareModal';
 import CanvasSettingsModal from '@/components/collabboard/canvas/ui/CanvasSettingsModal';
 import CanvasTitleHeader, { CANVAS_TITLE_HEADER_HEIGHT } from '@/components/collabboard/canvas/ui/CanvasTitleHeader';
@@ -594,6 +598,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const boardFreeze = useBoardFrozen(canvasId, canvasFrozenAt);
   const boardIsFrozen = boardFreeze.frozenAt != null;
   const canUnfreezeBoard = isBoardOwner(user?.id, canvasId, canvas);
+  // PATCH-374. A guest is an anonymous session; the facilitator kit is for the
+  // board's host and never for one.
+  const isGuestUser = (user as { is_anonymous?: boolean } | null)?.is_anonymous === true;
 
   /**
    * May this user change the shared CONTENT of this board -- its padlets?
@@ -9064,6 +9071,92 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     commentPopupHighlightColor,
   };
 
+  /* ── PATCH-374. Facilitator kit ─────────────────────────────────────────────
+   * Wiring only. `useBoardFacilitation` owns the session state (the `boards`
+   * row) and the RPCs; `BoardTimerPill` and `FacilitatorMenu` own the pixels.
+   * These callbacks are the only bridge between them and this component's
+   * viewport, and they are the reason this patch touches this file at all.
+   */
+  const canFacilitate = isBoardOwner(user?.id, canvasId, canvas) && !isGuestUser;
+
+  /** The first post card actually on screen: top-most, then left-most. */
+  const firstVisiblePostId = useCallback((): string | null => {
+    const cards = Array.from(document.querySelectorAll('[data-post-card-id]')) as HTMLElement[];
+    const visible = cards
+      .map((el) => ({ el, shell: (el.closest('[data-post-card-shell]') as HTMLElement | null) ?? el }))
+      .map((entry) => ({ ...entry, rect: entry.shell.getBoundingClientRect() }))
+      .filter((entry) => (
+        entry.rect.width > 0 && entry.rect.height > 0
+        && entry.rect.bottom > 0 && entry.rect.right > 0
+        && entry.rect.top < window.innerHeight && entry.rect.left < window.innerWidth
+      ));
+    visible.sort((a, b) => (a.rect.top - b.rect.top) || (a.rect.left - b.rect.left));
+    return visible[0]?.el.getAttribute('data-post-card-id') ?? null;
+  }, []);
+
+  /**
+   * The world point at the centre of this viewer's viewport, and where that
+   * centre is on screen. `getCanvasPointFromClient` is the ONE canonical
+   * pointer -> world conversion (it reads the live world-origin rect, so it
+   * already accounts for the gutter, scroll and zoom).
+   */
+  const viewportCentre = useCallback(() => {
+    const viewport = containerRef.current;
+    const rect = viewport?.getBoundingClientRect();
+    const width = viewport?.clientWidth || 1200;
+    const height = viewport?.clientHeight || 800;
+    const clientX = (rect?.left ?? 0) + width / 2;
+    const clientY = (rect?.top ?? 0) + height / 2;
+    return { clientX, clientY, world: getCanvasPointFromClient(clientX, clientY) };
+  }, [getCanvasPointFromClient]);
+
+  /**
+   * RECEIVE a summon. Freeform: the zoom is applied ANCHORED AT THE VIEWPORT
+   * CENTRE, which leaves the world point under that centre unchanged -- so the
+   * centre is read once, before it, and the pan then moves that same point onto
+   * the host's. Every other layout scrolls the named card into view.
+   */
+  const handleSummon = useCallback((target: SummonTarget) => {
+    if (target.kind === 'freeform') {
+      const { clientX, clientY, world } = viewportCentre();
+      zoomAtViewportPoint(() => target.zoom, clientX, clientY);
+      panByWorldDelta(target.x - world.x, target.y - world.y);
+      toast.info("Moved to the host's view");
+      return;
+    }
+    // A post that is no longer there is neither a move nor a toast.
+    if (!document.querySelector(`[data-post-card-id="${target.postId}"]`)) return;
+    scrollToPostCard(target.postId);
+    toast.info("Moved to the host's view");
+  }, [viewportCentre, zoomAtViewportPoint, panByWorldDelta, scrollToPostCard]);
+
+  const facilitation = useBoardFacilitation({
+    boardId: canvasId,
+    currentUserId: user?.id ?? null,
+    onSummon: handleSummon,
+  });
+  const { timer: boardTimer, summon: summonBoard } = facilitation;
+
+  /**
+   * SEND a summon. Freeform sends the world point and the zoom the host is
+   * looking at; every other layout sends the first card in the host's view.
+   */
+  const summonEveryoneHere = useCallback(() => {
+    if (isFreeformLayout) {
+      const { world } = viewportCentre();
+      void summonBoard({ kind: 'freeform', x: world.x, y: world.y, zoom: canvasZoom });
+      return;
+    }
+    const postId = firstVisiblePostId();
+    if (!postId) {
+      toast.info('Nothing on screen to bring everyone to');
+      return;
+    }
+    void summonBoard({ kind: 'post', postId });
+  }, [isFreeformLayout, viewportCentre, canvasZoom, firstVisiblePostId, summonBoard]);
+
+  const [isFacilitatorMenuOpen, setIsFacilitatorMenuOpen] = useState(false);
+
   // Show loading state during SSR and initial hydration to prevent mismatch
   if (!hasMounted || loading) {
     return (
@@ -9087,7 +9180,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     isColumnsLayout,
     isGridLayout,
     enableBoardAiChat,
-    isGuest: (user as { is_anonymous?: boolean } | null)?.is_anonymous === true,
+    isGuest: isGuestUser,
+    canFacilitate,
+    canvasLayout: canvas?.layout ?? null,
     chronoMode,
     canManageCanvasShare,
     canUseFreeformEditButton,
@@ -9479,6 +9574,15 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
         // layouts, the analogue of Kanban's rail button.
         closeAllToolbarLaunchedUi();
         toggleBoardAiChat();
+        break;
+      case 'facilitate':
+        // PATCH-374. The facilitator panel. The registry already withholds this
+        // tool from anyone who is not the host.
+        {
+          const shouldOpenFacilitatorMenu = !isFacilitatorMenuOpen;
+          closeAllToolbarLaunchedUi();
+          setIsFacilitatorMenuOpen(shouldOpenFacilitatorMenu);
+        }
         break;
       case 'canvas-settings':
         closeAllToolbarLaunchedUi();
@@ -12242,6 +12346,39 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             handleChangeLineLayer={handleChangeLineLayer}
           />
         </CanvasViewport>
+
+        {/* PATCH-374 Addendum 1. The facilitator kit is a SIBLING of
+            CanvasViewport, for the exact reason LibraryPanel is (see below):
+            CanvasViewport sets `isolation: 'isolate'` (PATCH 9M) to contain its
+            own z-index stack, which also traps every descendant's z-index inside
+            that boundary. The live defect: `FacilitatorMenu`'s z-[1960] was
+            trapped, so FreeformNavigationControl -- a sibling at z-40, in the
+            ROOT context -- painted over the menu and swallowed real clicks on
+            "Bring everyone here". Out here the z-index finally counts. The pill
+            moves with it: it is fixed, so the relocation cannot clip it. */}
+        {FACILITATION_LAYOUTS.has(canvas?.layout ?? '') ? (
+          <BoardTimerPill
+            timer={boardTimer}
+            canControl={canFacilitate}
+            onPause={facilitation.pause}
+            onResume={facilitation.resume}
+            onAdd={facilitation.add}
+            onStop={facilitation.stop}
+          />
+        ) : null}
+
+        {/* PATCH-374. The host's facilitator panel, opened from the toolbar
+            tool; the registry already withholds that tool from anyone else.
+            Anchored below the title header and clear of the left toolbar, so it
+            cannot sit over the bottom-left navigation/minimap control. */}
+        <FacilitatorMenu
+          open={isFacilitatorMenuOpen}
+          canControl={canFacilitate}
+          isMapLayout={isMapLayout}
+          onStart={facilitation.start}
+          onSummon={summonEveryoneHere}
+          onClose={() => setIsFacilitatorMenuOpen(false)}
+        />
 
         {/* P6J-F7-B1 Knowledge reader. A sibling here for the same reason
             LibraryPanel is (see below), plus one of its own: CanvasSidebar sits

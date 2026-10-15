@@ -82,6 +82,10 @@ export default defineConfig({
       // components/collabboard/presence; without this line their tests are
       // silently NOT RUN (the trap the notes above warn of).
       'components/collabboard/presence/**/*.test.*',
+      // PATCH-374: the facilitator kit (timer pill, facilitator menu, the
+      // facilitation hook) lives under components/collabboard/facilitation;
+      // without this line their tests are silently NOT RUN (the trap above).
+      'components/collabboard/facilitation/**/*.test.*',
       'components/settings/ai/*.test.ts',
       'components/settings/ai/*.test.tsx',
       // Shared AI components used by several surfaces (the role model chooser).

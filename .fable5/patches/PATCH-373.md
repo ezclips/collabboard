@@ -1,6 +1,6 @@
 # PATCH-373 — Columns and Grid sections update live for everyone
 
-**Status:** approved
+**Status:** done
 
 ## Goal
 When anyone adds, renames, reorders or deletes a column (Columns) or section (Grid),

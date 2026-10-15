@@ -19,6 +19,7 @@ import {
   Sparkles,
   StickyNote,
   Table,
+  Timer,
   UserPlus,
 } from 'lucide-react';
 import type { ChronoMode } from '@/types/collabboard';
@@ -37,6 +38,18 @@ export type CanvasToolbarFlags = {
   /** PATCH-371. Board AI exists only when the feature flag is on and the caller is not a guest. */
   enableBoardAiChat?: boolean;
   isGuest?: boolean;
+  /**
+   * PATCH-374. The facilitator kit (a shared countdown and "Bring everyone
+   * here"). The board's HOST -- owner or board admin -- and never a guest; the
+   * RPCs refuse anyone else whatever the toolbar renders.
+   */
+  canFacilitate?: boolean;
+  /**
+   * PATCH-374. The board's raw layout, for the one allowlist that is not a set
+   * of flags: {@link FACILITATION_LAYOUTS}. `isFreeformLayout` cannot be used
+   * for it -- that is a catch-all which also swallows Table/Stream/Drawing.
+   */
+  canvasLayout?: string | null;
   chronoMode: ChronoMode | string | null;
   canManageCanvasShare: boolean;
   canUseFreeformEditButton: boolean;
@@ -96,6 +109,20 @@ export type CanvasToolbarFlags = {
 export function isDirectPdfCanvasLayout(layout: string | null | undefined): boolean {
   return layout === 'freeform' || layout === 'scheduler';
 }
+
+/**
+ * PATCH-374. The layouts the facilitator kit runs on. The ONE allowlist: the
+ * toolbar gate reads it, so a layout added here gets the tool and nothing else
+ * does. Deliberately not `isFreeformLayout`, which is a catch-all.
+ */
+export const FACILITATION_LAYOUTS: ReadonlySet<string> = new Set([
+  'freeform',
+  'wall',
+  'columns',
+  'grid',
+  'timeline',
+  'map',
+]);
 
 function GraphLineToolIcon({ size = 18, className, ...rest }: { size?: number; className?: string; [key: string]: unknown }) {
   return (
@@ -194,6 +221,8 @@ export function buildCanvasToolbarGroups({
   isGridLayout = false,
   enableBoardAiChat = false,
   isGuest = false,
+  canFacilitate = false,
+  canvasLayout = null,
   chronoMode,
   canManageCanvasShare,
   canUseFreeformEditButton,
@@ -220,6 +249,11 @@ export function buildCanvasToolbarGroups({
   const isPadletBoardAiLayout = isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout || isMapLayout;
   const showBoardAiTool = enableBoardAiChat && !isGuest && isPadletBoardAiLayout;
 
+  // PATCH-374. The facilitator kit runs on the six layouts that share the
+  // canvas viewport, and only for the board's host. Kanban, Scheduler and Gantt
+  // are separate pages and come later.
+  const showFacilitateTool = canFacilitate && !isGuest && FACILITATION_LAYOUTS.has(canvasLayout ?? '');
+
   return [
     // Group 1 - Canvas-specific (always visible, priority 1); only rendered when
     // there are canvas-specific tools AND the workspace capability is present.
@@ -240,6 +274,18 @@ export function buildCanvasToolbarGroups({
       label: 'AI',
       tools: [
         { icon: Sparkles, label: 'Board AI', color: 'text-purple-600', bg: 'hover:bg-purple-50', type: 'board-ai' },
+      ],
+      priority: 3,
+      alwaysVisible: true,
+    }] : []),
+    // PATCH-374. Facilitate: next to Board AI, for the board's host only. It
+    // writes the `boards` row, not `padlets`, so it is deliberately NOT gated on
+    // board-content authority.
+    ...(showFacilitateTool ? [{
+      id: 'facilitate',
+      label: 'Facilitate',
+      tools: [
+        { icon: Timer, label: 'Facilitate', color: 'text-amber-600', bg: 'hover:bg-amber-50', type: 'facilitate' },
       ],
       priority: 3,
       alwaysVisible: true,
