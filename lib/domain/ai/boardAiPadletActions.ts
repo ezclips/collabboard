@@ -100,12 +100,18 @@ export function layoutNounFor(layout: string | null | undefined): LayoutNoun {
 }
 
 /**
- * The actions offered on this layout. A Map post is a place on the globe rather
- * than a spot in a viewport, so grouping and moving posts makes no sense there:
- * Map gets the `answer` actions only.
+ * The actions offered on this layout.
+ *
+ * A Map post is a place on the globe rather than a spot in a viewport, so
+ * grouping and moving posts makes no sense there: Map gets the `answer` actions
+ * only. PATCH-380 reuses that same rule for a GUEST on any layout -- a guest may
+ * ask questions, never restructure the board.
  */
-export function actionsForLayout(layout: string | null | undefined): readonly BoardAiPadletAction[] {
-  if (layout === 'map') {
+export function actionsForLayout(
+  layout: string | null | undefined,
+  options?: { readonly answerOnly?: boolean },
+): readonly BoardAiPadletAction[] {
+  if (options?.answerOnly === true || layout === 'map') {
     return PADLET_BOARD_AI_ACTIONS.filter((action) => action.kind === 'answer');
   }
   return PADLET_BOARD_AI_ACTIONS;

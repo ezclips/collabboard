@@ -151,13 +151,16 @@ describe('PATCH 9C.1: prior patches remain untouched (regression guards)', () =>
     expect(src).toContain('await attachPostToContainer({');
   });
 
-  it('Replace Image (PATCH 9B) still uses createStorageGateway, not base64/openImagePostEditor [matrix 21]', () => {
+  it('Replace Image (PATCH 9B) still uploads to storage via the viewer seam, not base64/openImagePostEditor [matrix 21]', () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
     const start = src.indexOf('const replaceImage = (id: string) => {');
     const end = src.indexOf('const imageExtensionFromMimeType', start);
     const body = src.slice(start, end);
-    expect(body).toContain('createStorageGateway()');
+    // PATCH-380. The destination moved into the shared viewer-upload seam; the
+    // seam uploads a member to Storage (its own test pins that).
+    expect(body).toContain('uploadFileForViewer(');
     expect(body).not.toContain('openImagePostEditor');
+    expect(read('lib/infra/collabboard/viewerUpload.ts')).toContain('createStorageGateway()');
   });
 
   it('Download Original Image (PATCH 9B.1) still resolves metadata.imageUrl || file_url || metadata.fileUrl and shows a visible error on failure [matrix 21]', () => {

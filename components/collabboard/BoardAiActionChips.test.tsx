@@ -95,6 +95,17 @@ describe('A. the chip row', () => {
     fireEvent.click(chip('summarize')!);
     expect(onSend).not.toHaveBeenCalled();
   });
+
+  it('PATCH-380: answerOnly gives a guest the answer chips and nothing else', () => {
+    mount({ answerOnly: true });
+    expect(chips().map((el) => el.getAttribute('data-board-ai-action')))
+      .toEqual(['summarize', 'duplicates', 'open-questions']);
+    // The `/` menu filters the same list, so a guest cannot type their way to a
+    // proposal either.
+    cleanup();
+    mount({ answerOnly: true, draft: '/group' });
+    expect(document.querySelector('[data-board-ai-action-menu="true"]')).toBeNull();
+  });
 });
 
 describe('B. the `/` menu', () => {

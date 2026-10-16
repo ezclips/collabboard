@@ -54,7 +54,9 @@ import {
   recordBoardAiCreditUsage,
 } from '@/lib/server/billing/aiCredits';
 import { asBoardId, asUserId } from '@/lib/domain/core/ids';
+import type { DomainError } from '@/lib/domain/core/errors';
 import { isGuestUser } from '@/lib/domain/auth/guest';
+import { recordGuestActivityForRoute } from '@/lib/server/sharing/guestPermissions';
 import type { BoardAiJsonValue } from '@/lib/domain/ai/boardAiChat';
 import {
   resolveBoardAiChatContext,
@@ -120,6 +122,20 @@ function createChatRouteClient(cookieStore: ResolvedNextCookieStore) {
   return createRouteHandlerClient({
     cookies: () => cookieStore as unknown as ReturnType<typeof cookies>,
   });
+}
+
+/**
+ * PATCH-380 Addendum 1. Every thread/message storage failure returns 503; log
+ * the CODES so a 503 can never be silent again. The live run found the guest
+ * chat broken for weeks because the RLS refusal surfaced only as a bare 503.
+ *
+ * NO USER DATA: only the domain code and the database's own error code, so the
+ * line can be matched against the Postgres logs. Never a message, an id or a row.
+ */
+function logBoardChatStorageFailure(where: string, error: DomainError): void {
+  const cause = error.cause as { code?: unknown } | null | undefined;
+  const dbCode = cause && typeof cause.code === 'string' ? cause.code : null;
+  console.error('Board AI chat storage failed', { where, code: error.code, dbCode });
 }
 
 /**
@@ -291,6 +307,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         cost: AI_CREDIT_COSTS.board_chat,
         now: new Date(),
         isGuest: isGuestUser(user),
+        // PATCH-380. This route -- the Board AI CHAT -- is the ONLY AI surface a
+        // guest may reach, and only when the owner switched Board AI on for
+        // guests. Every other `checkBoardAiCredits` caller leaves this false.
+        allowGuest: true,
         // Basic Q&A on boards keeps answering at 0 credits on a paid plan.
         boardChat: true,
         preferences: createAIRolePreferenceRepository(),
@@ -403,14 +423,20 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     let thread;
     if (threadId) {
       const found = await repository.getThread(scopedUser, scopedBoard, threadId);
-      if (!found.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      if (!found.ok) {
+        logBoardChatStorageFailure('post:getThread', found.error);
+        return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      }
       if (found.value === null) {
         return NextResponse.json({ error: 'Chat thread not found' }, { status: 404 });
       }
       thread = found.value;
     } else {
       const created = await repository.createThread(scopedUser, scopedBoard);
-      if (!created.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      if (!created.ok) {
+        logBoardChatStorageFailure('post:createThread', created.error);
+        return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      }
       thread = created.value;
     }
 
@@ -439,10 +465,16 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           )],
       ) as unknown as BoardAiJsonValue | null,
     });
-    if (!stored.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    if (!stored.ok) {
+      logBoardChatStorageFailure('post:appendUserMessage', stored.error);
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
 
     const history = await repository.listMessages(scopedUser, scopedBoard, thread.id);
-    if (!history.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    if (!history.ok) {
+      logBoardChatStorageFailure('post:listMessages', history.error);
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
 
     // Only role and content cross into the model. Everything else a row
     // carries -- ids, timestamps, and the self-reported provider/model -- is
@@ -500,6 +532,9 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
         credentials: createAIProviderCredentialRepository(),
         // PATCH-190: the key runs only when the check's kind says it may.
         allowByok: allowByokFor(creditDecision),
+        // PATCH-380. A guest never gets the board-change instructions, and the
+        // proposals below are dropped for them too.
+        isGuest: isGuestUser(user),
       }, modelContext, boardAiSearchPromptState(searchResult?.outcome ?? 'off'));
     } catch (error) {
       // The user's message stays. No assistant row is written, because there
@@ -548,6 +583,18 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
           credits: creditCost,
         });
       }
+    }
+
+    // PATCH-380. ONE row per allowed guest call, recorded only here -- after the
+    // model was actually called -- so a refusal or a provider failure never
+    // counts against the guest's cap. Best effort (see the helper).
+    if (isGuestUser(user)) {
+      await recordGuestActivityForRoute({
+        boardId,
+        userId: user.id,
+        kind: 'ai',
+        now: new Date(),
+      });
     }
 
     // PATCH-350. The Kanban change block is read ONLY on a turn that carried the
@@ -641,7 +688,10 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
      * token or name drops that change. Not persisted, exactly like Kanban's.
      */
     let proposedPadletChanges: readonly PadletProposedChange[] = [];
-    if (isPadletTurn && padletChangeBlock.raw) {
+    // PATCH-380. NEVER FOR A GUEST. The instructions were withheld above, so a
+    // block here is something the guest's own text produced -- drop it rather
+    // than hand them a board-change list they may not apply.
+    if (isPadletTurn && padletChangeBlock.raw && !isGuestUser(user)) {
       const overview = modelContext.find((block) => block.type === 'padlet-board');
       const boardPanels = await readPadletBoardPanels(
         sessionClient as unknown as BoardAiPadletBoardSupabaseClient,
@@ -699,6 +749,7 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
       ...(signedCitations ? { citations: signedCitations as unknown as BoardAiJsonValue } : {}),
     });
     if (!assistant.ok) {
+      logBoardChatStorageFailure('post:appendAssistantMessage', assistant.error);
       // The thread id travels even on this failure. The answer was generated
       // and then lost, which is what the 503 says; but the thread and the
       // user's question ARE durable, and a client that opened a NEW thread
@@ -772,6 +823,9 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       requestedThreadId,
     );
     if (!result.ok) {
+      if (result.error.code !== 'not_found') {
+        logBoardChatStorageFailure('delete:deleteThread', result.error);
+      }
       return result.error.code === 'not_found'
         ? NextResponse.json({ error: 'Chat thread not found' }, { status: 404 })
         : NextResponse.json({ error: 'Unavailable' }, { status: 503 });
@@ -830,7 +884,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     const requestedThreadId = new URL(request.url).searchParams.get('threadId');
     if (requestedThreadId === null) {
       const threads = await repository.listThreads(scopedUser, scopedBoard);
-      if (!threads.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      if (!threads.ok) {
+        logBoardChatStorageFailure('get:listThreads', threads.error);
+        return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+      }
       return NextResponse.json({
         threads: threads.value.map((entry) => ({
           id: entry.id,
@@ -853,6 +910,7 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
       // The repository reports a thread outside this user+board scope as
       // not_found; every other failure is infrastructure.
       const status = messages.error.code === 'not_found' ? 404 : 503;
+      if (status === 503) logBoardChatStorageFailure('get:listMessages', messages.error);
       return NextResponse.json(
         { error: status === 404 ? 'Chat thread not found' : 'Unavailable' },
         { status },
@@ -860,7 +918,10 @@ export async function GET(request: Request, context: { params: Promise<{ id: str
     }
 
     const thread = await repository.getThread(scopedUser, scopedBoard, requestedThreadId);
-    if (!thread.ok) return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    if (!thread.ok) {
+      logBoardChatStorageFailure('get:getThread', thread.error);
+      return NextResponse.json({ error: 'Unavailable' }, { status: 503 });
+    }
     if (thread.value === null) {
       return NextResponse.json({ error: 'Chat thread not found' }, { status: 404 });
     }

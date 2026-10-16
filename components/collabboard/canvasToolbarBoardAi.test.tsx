@@ -71,7 +71,8 @@ describe('PATCH-375 the floating button is the one entry point', () => {
     // Freeform keeps the PATCH-300 flag it always had; the five are added.
     expect(CLIENT).toContain('const showBoardAssistantButtons = !!canvas && isFreeformLayout;');
     expect(CLIENT).toContain('const showBoardAiLauncher = enableBoardAiChat');
-    expect(CLIENT).toContain('&& (showBoardAssistantButtons || (isPadletBoardAiLayout && !isGuestUser));');
+    // PATCH-380. A guest on the five is excluded UNLESS the owner allowed it.
+    expect(CLIENT).toContain('|| (isPadletBoardAiLayout && (!isGuestUser || guestAiAllowed)));');
     // And it is the flag the button renders on.
     expect(CLIENT).toContain('{showBoardAiLauncher && !isBlockingEditorModalOpen');
   });
@@ -83,7 +84,7 @@ describe('PATCH-375 the floating button is the one entry point', () => {
   it('excludes a guest on the five, and not on Freeform', () => {
     // The guest exclusion is INSIDE the Padlet arm only, so Freeform's rule is
     // untouched (a guest on a freeform board keeps the button it always had).
-    expect(CLIENT).toContain('(isPadletBoardAiLayout && !isGuestUser)');
+    expect(CLIENT).toContain('(isPadletBoardAiLayout && (!isGuestUser || guestAiAllowed))');
     expect(CLIENT).not.toContain('(showBoardAssistantButtons && !isGuestUser)');
   });
 

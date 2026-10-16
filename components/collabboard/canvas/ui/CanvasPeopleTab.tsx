@@ -146,6 +146,7 @@ export default function CanvasPeopleTab({ canvasId }: CanvasPeopleTabProps) {
                 <button
                   type="button"
                   data-person-remove="true"
+                  data-remove-person={person.userId}
                   onClick={() => setConfirmRemoveId(person.userId)}
                   className="flex shrink-0 items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
                 >

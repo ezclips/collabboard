@@ -12,6 +12,11 @@ export interface BoardCollaboratorRow {
   readonly user_id: string;
   readonly role?: string | null;
   readonly added_at?: string | null;
+  /**
+   * PATCH-380. Which share link granted the row, when one did. Used to tell the
+   * owner how many people a link delete would take with it.
+   */
+  readonly joined_via_link_id?: string | null;
 }
 
 /** The `public.users` profile a collaborator id resolves to, if any. */
@@ -29,6 +34,8 @@ export interface BoardPerson {
   readonly role: string;
   readonly isGuest: boolean;
   readonly joinedAt: string | null;
+  /** PATCH-380. The share link this person joined through, or null. */
+  readonly joinedViaLinkId: string | null;
 }
 
 function nonEmpty(value: string | null | undefined): string | null {
@@ -52,6 +59,7 @@ export function boardPersonFromRow(
     role: nonEmpty(row.role) ?? 'viewer',
     isGuest: email === null,
     joinedAt: nonEmpty(row.added_at),
+    joinedViaLinkId: nonEmpty(row.joined_via_link_id),
   };
 }
 

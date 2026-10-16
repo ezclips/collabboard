@@ -20,9 +20,12 @@ import {
   type GuestLink,
   type GuestLinkPermission,
 } from '@/lib/domain/sharing/guestLinks';
+import type { BoardPerson } from '@/lib/domain/sharing/boardPeople';
 import GuestLinkQrOverlay from './GuestLinkQrOverlay';
+import GuestLinkOffConfirm from './GuestLinkOffConfirm';
 import GuestApprovalToggle from './GuestApprovalToggle';
 import GuestNamesToggle from './GuestNamesToggle';
+import GuestPermissionsToggle from './GuestPermissionsToggle';
 
 export interface CanvasGuestLinksTabProps {
   readonly canvasId: string;
@@ -47,6 +50,11 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
   const [confirmOffId, setConfirmOffId] = useState<string | null>(null);
   const [turningOffId, setTurningOffId] = useState<string | null>(null);
   const [qrLink, setQrLink] = useState<GuestLink | null>(null);
+  // PATCH-380. The people who joined by link, so the delete confirm can say how
+  // many a link delete would also remove.
+  const [people, setPeople] = useState<readonly BoardPerson[]>([]);
+  // The "also remove" checkbox is ON by default, each time the confirm opens.
+  const [removeJoined, setRemoveJoined] = useState(true);
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/boards/${canvasId}/share-links`);
@@ -64,13 +72,26 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
     setLinks(Array.isArray(body?.links) ? (body.links as GuestLink[]) : []);
   }, [canvasId]);
 
+  // PATCH-380. The people list is owner-only too; a failure here just means the
+  // confirm shows no count, never a broken tab.
+  const loadPeople = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/boards/${canvasId}/collaborators`);
+      if (!response.ok) return;
+      const body = await response.json().catch(() => ({}));
+      if (Array.isArray(body?.people)) setPeople(body.people as BoardPerson[]);
+    } catch {
+      // Non-fatal: the delete confirm falls back to "link only".
+    }
+  }, [canvasId]);
+
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError('');
     void (async () => {
       try {
-        await load();
+        await Promise.all([load(), loadPeople()]);
       } catch {
         if (!cancelled) setError('Could not load guest links.');
       } finally {
@@ -78,7 +99,9 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
       }
     })();
     return () => { cancelled = true; };
-  }, [load]);
+  }, [load, loadPeople]);
+
+  const joinedCount = (linkId: string) => people.filter((person) => person.joinedViaLinkId === linkId).length;
 
   const create = async () => {
     if (creating) return;
@@ -141,7 +164,13 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
     setTurningOffId(linkId);
     setError('');
     try {
-      const response = await fetch(`/api/boards/${canvasId}/share-links/${linkId}`, { method: 'DELETE' });
+      const response = await fetch(`/api/boards/${canvasId}/share-links/${linkId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        // PATCH-380. `removeJoined` is honoured only when the box is ticked (and
+        // there is someone to remove); otherwise the link alone goes.
+        body: JSON.stringify({ removeJoined: removeJoined && joinedCount(linkId) > 0 }),
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         setError(typeof body?.error === 'string' && body.error ? body.error : 'Could not turn off this link.');
@@ -154,6 +183,11 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
     } finally {
       setTurningOffId(null);
     }
+  };
+
+  const openConfirm = (linkId: string) => {
+    setRemoveJoined(true);
+    setConfirmOffId(linkId);
   };
 
   if (loading) {
@@ -183,6 +217,8 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
       <div className="divide-y divide-gray-100 rounded-xl border border-[#dfdafb] px-3">
         <GuestApprovalToggle boardId={canvasId} />
         <GuestNamesToggle boardId={canvasId} />
+        {/* PATCH-380. The owner's two guest-permission switches, owner-only. */}
+        <GuestPermissionsToggle boardId={canvasId} />
       </div>
 
       {error ? (
@@ -307,25 +343,14 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
               </div>
 
               {confirmOffId === link.id ? (
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-xs text-gray-600">Turn off?</span>
-                  <button
-                    type="button"
-                    data-guest-link-off-confirm="true"
-                    onClick={() => void turnOff(link.id)}
-                    disabled={turningOffId === link.id}
-                    className="rounded-lg bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
-                  >
-                    Turn off
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setConfirmOffId(null)}
-                    className="rounded-lg px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100"
-                  >
-                    Cancel
-                  </button>
-                </div>
+                <GuestLinkOffConfirm
+                  joinedCount={joinedCount(link.id)}
+                  removeJoined={removeJoined}
+                  onRemoveJoinedChange={setRemoveJoined}
+                  busy={turningOffId === link.id}
+                  onConfirm={() => void turnOff(link.id)}
+                  onCancel={() => setConfirmOffId(null)}
+                />
               ) : (
                 <div className="flex shrink-0 items-center gap-1">
                   <button
@@ -348,7 +373,7 @@ export default function CanvasGuestLinksTab({ canvasId, canvasTitle }: CanvasGue
                   <button
                     type="button"
                     data-guest-link-off="true"
-                    onClick={() => setConfirmOffId(link.id)}
+                    onClick={() => openConfirm(link.id)}
                     className="rounded-lg px-2.5 py-1 text-xs font-medium text-red-600 hover:bg-red-50"
                   >
                     Turn off

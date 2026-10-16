@@ -6,13 +6,20 @@ interface WallPlacementPromptProps {
     onClose: () => void;
     onNewContainer: () => void;
     onAddToExisting: () => void;
+    /**
+     * PATCH-380 Addendum 1. False for a guest: a guest may not create a
+     * container (PATCH-379), so "New Container" is hidden and only "Add to
+     * Existing" is offered.
+     */
+    canCreateContainer?: boolean;
 }
 
 export default function WallPlacementPrompt({
     isOpen,
     onClose,
     onNewContainer,
-    onAddToExisting
+    onAddToExisting,
+    canCreateContainer = true
 }: WallPlacementPromptProps) {
     if (!isOpen) return null;
 
@@ -31,23 +38,26 @@ export default function WallPlacementPrompt({
 
                 <div className="p-6 space-y-4">
                     <p className="text-gray-500 text-sm">
-                        On the Wall layout, posts must list inside containers.
-                        Choose whether to start a new container or add this to one already on the canvas.
+                        {canCreateContainer
+                            ? 'On the Wall layout, posts must list inside containers. Choose whether to start a new container or add this to one already on the canvas.'
+                            : 'On the Wall layout, posts must list inside containers. Add this to a container already on the canvas.'}
                     </p>
 
                     <div className="grid grid-cols-1 gap-3">
-                        <button
-                            onClick={onNewContainer}
-                            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
-                        >
-                            <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-colors">
-                                <LayoutGrid className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <div className="font-bold text-gray-800">New Container</div>
-                                <div className="text-xs text-gray-500">Create a new container on the wall</div>
-                            </div>
-                        </button>
+                        {canCreateContainer ? (
+                            <button
+                                onClick={onNewContainer}
+                                className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
+                            >
+                                <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-colors">
+                                    <LayoutGrid className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <div className="font-bold text-gray-800">New Container</div>
+                                    <div className="text-xs text-gray-500">Create a new container on the wall</div>
+                                </div>
+                            </button>
+                        ) : null}
 
                         <button
                             onClick={onAddToExisting}

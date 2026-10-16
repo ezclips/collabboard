@@ -1,7 +1,7 @@
 import { decodeImageDataUrl } from '../../domain/canvas/imageDataUrl';
 import { parseKnowledgePdfAreaProvenance } from '../../domain/knowledge/knowledgePdfAreaImagePolicy';
 import { UPLOAD_LIMITS, tooLargeMessage } from '../../domain/storage/uploadLimits';
-import { createStorageGateway } from '../supabase/storage';
+import { uploadFileForViewer } from './viewerUpload';
 
 /**
  * PATCH-182 -- the ONE place an edited Image picture is moved out of the post
@@ -28,14 +28,14 @@ export type StoredImageEdit = {
   readonly stored: 'public-file' | 'private-file' | 'inline';
 };
 
-const PADLET_FILES_BUCKET = 'padlet-files';
-
 export async function storeEditedImage(input: {
   boardId: string;
   padletId: string;
   metadata: unknown;
   variant: 'drawing' | 'base';
   dataUrl: string;
+  /** PATCH-380. A guest's edited picture goes through the server upload route. */
+  isGuest?: boolean;
 }): Promise<StoredImageEdit> {
   const { boardId, padletId, metadata, variant, dataUrl } = input;
 
@@ -70,13 +70,18 @@ export async function storeEditedImage(input: {
   }
 
   // Any other post: the same bucket and gateway the board's own uploads use.
+  // PATCH-380: for a guest this is the server route (Storage refuses a guest
+  // direct write); the member path is unchanged.
   try {
-    const gateway = createStorageGateway();
     const path = `image-edits/${boardId}/${padletId}/${variant}-${Date.now()}.png`;
     const file = new File([bytes], `${variant}.png`, { type: 'image/png' });
-    const result = await gateway.upload(PADLET_FILES_BUCKET, path, file);
-    if (!result.ok) throw new Error(result.error.message);
-    return { url: gateway.getPublicUrl(PADLET_FILES_BUCKET, path), stored: 'public-file' };
+    const url = await uploadFileForViewer({
+      isGuest: input.isGuest === true,
+      boardId,
+      file,
+      storagePath: path,
+    });
+    return { url, stored: 'public-file' };
   } catch (reason) {
     console.warn('[image-edit] kept inline:', reason);
     return { url: dataUrl, stored: 'inline' };
@@ -120,6 +125,8 @@ function uploadExtensionFor(mimeType: string): string {
 export async function storeUploadedImage(input: {
   boardId: string;
   file: File;
+  /** PATCH-380. A guest's new upload goes through the server upload route. */
+  isGuest?: boolean;
 }): Promise<StoredUploadedImage> {
   const { boardId, file } = input;
 
@@ -134,14 +141,24 @@ export async function storeUploadedImage(input: {
   }
 
   try {
-    const gateway = createStorageGateway();
     // A RANDOM name: the user's filename is never used in the path.
     const path = `image-uploads/${boardId}/${crypto.randomUUID()}.${uploadExtensionFor(file.type)}`;
-    const result = await gateway.upload(PADLET_FILES_BUCKET, path, file);
-    if (!result.ok) throw new Error(result.error.message);
-    return { ok: true, url: gateway.getPublicUrl(PADLET_FILES_BUCKET, path) };
+    const url = await uploadFileForViewer({
+      isGuest: input.isGuest === true,
+      boardId,
+      file,
+      storagePath: path,
+    });
+    return { ok: true, url };
   } catch (reason) {
     console.warn('[image-upload] failed:', reason);
-    return { ok: false, message: 'Could not upload the image. Please try again.' };
+    // PATCH-380. A guest is refused by the SERVER (switch off, type, size, cap):
+    // that message is the one the editor must show. A member failure keeps the
+    // generic text it has always shown.
+    const message =
+      input.isGuest === true && reason instanceof Error && reason.message.trim().length > 0
+        ? reason.message
+        : 'Could not upload the image. Please try again.';
+    return { ok: false, message };
   }
 }

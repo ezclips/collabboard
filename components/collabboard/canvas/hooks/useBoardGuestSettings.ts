@@ -16,10 +16,18 @@ import { supabaseBrowser } from '@/lib/supabase/browser';
 
 export interface UseBoardGuestSettingsResult {
   readonly hideGuestNames: boolean;
+  /**
+   * PATCH-380. The owner's two guest switches, live, so a guest's toolbar
+   * follows them without a reload.
+   */
+  readonly guestUploadsAllowed: boolean;
+  readonly guestAiAllowed: boolean;
 }
 
 export function useBoardGuestSettings(boardId: string | null | undefined): UseBoardGuestSettingsResult {
   const [hideGuestNames, setHideGuestNames] = useState(false);
+  const [guestUploadsAllowed, setGuestUploadsAllowed] = useState(false);
+  const [guestAiAllowed, setGuestAiAllowed] = useState(false);
   const instanceId = useId();
 
   // One read so the first render is correct.
@@ -31,7 +39,7 @@ export function useBoardGuestSettings(boardId: string | null | undefined): UseBo
         const supabase = supabaseBrowser();
         const { data, error } = await supabase
           .from('boards')
-          .select('hide_guest_names')
+          .select('hide_guest_names, guest_uploads_allowed, guest_ai_allowed')
           .eq('id', boardId)
           .maybeSingle();
         if (cancelled) return;
@@ -40,6 +48,9 @@ export function useBoardGuestSettings(boardId: string | null | undefined): UseBo
           return;
         }
         setHideGuestNames((data as { hide_guest_names?: boolean | null } | null)?.hide_guest_names === true);
+        const row = data as { guest_uploads_allowed?: boolean | null; guest_ai_allowed?: boolean | null } | null;
+        setGuestUploadsAllowed(row?.guest_uploads_allowed === true);
+        setGuestAiAllowed(row?.guest_ai_allowed === true);
       } catch (error) {
         console.error('Error reading board guest settings:', error);
       }
@@ -61,8 +72,19 @@ export function useBoardGuestSettings(boardId: string | null | undefined): UseBo
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'boards', filter: `id=eq.${boardId}` },
           (payload) => {
-            const next = (payload.new as { hide_guest_names?: boolean | null } | null)?.hide_guest_names === true;
-            setHideGuestNames((current) => (current === next ? current : next));
+            const row = payload.new as {
+              hide_guest_names?: boolean | null;
+              guest_uploads_allowed?: boolean | null;
+              guest_ai_allowed?: boolean | null;
+            } | null;
+            const nextNames = row?.hide_guest_names === true;
+            const nextUploads = row?.guest_uploads_allowed === true;
+            const nextAi = row?.guest_ai_allowed === true;
+            setHideGuestNames((current) => (current === nextNames ? current : nextNames));
+            // PATCH-380. The owner can flip these while a guest is looking at the
+            // board, so the toolbar follows without a reload.
+            setGuestUploadsAllowed((current) => (current === nextUploads ? current : nextUploads));
+            setGuestAiAllowed((current) => (current === nextAi ? current : nextAi));
           },
         )
         .subscribe();
@@ -74,5 +96,5 @@ export function useBoardGuestSettings(boardId: string | null | undefined): UseBo
     return cleanup;
   }, [boardId, instanceId]);
 
-  return { hideGuestNames };
+  return { hideGuestNames, guestUploadsAllowed, guestAiAllowed };
 }

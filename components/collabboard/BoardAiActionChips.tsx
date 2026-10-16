@@ -31,6 +31,11 @@ export interface BoardAiActionChipsProps {
    * cannot honour.
    */
   readonly actionLayout?: string | null;
+  /**
+   * PATCH-380. A guest may ask questions and never restructure the board, so
+   * only the `answer` actions are offered -- the same list Map already uses.
+   */
+  readonly answerOnly?: boolean;
   /** True while a reply streams: every chip is disabled. */
   readonly disabled?: boolean;
   /** The composer's text, which is what opens the `/` menu. */
@@ -49,6 +54,7 @@ export interface BoardAiActionChipsProps {
 
 export default function BoardAiActionChips({
   actionLayout,
+  answerOnly = false,
   disabled = false,
   draft = '',
   onSend,
@@ -56,8 +62,8 @@ export default function BoardAiActionChips({
   onKeyHandlerChange,
 }: BoardAiActionChipsProps) {
   const actions = useMemo(
-    () => (actionLayout ? actionsForLayout(actionLayout) : []),
-    [actionLayout],
+    () => (actionLayout ? actionsForLayout(actionLayout, { answerOnly }) : []),
+    [actionLayout, answerOnly],
   );
   const noun = useMemo(() => layoutNounFor(actionLayout), [actionLayout]);
 

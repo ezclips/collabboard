@@ -188,6 +188,22 @@ describe('5-8. thread scoping', () => {
     expect(repo.createThread.mock.calls[0].slice(0, 2)).toEqual([USER_ID, BOARD_ID]);
   });
 
+  it('PATCH-380 Addendum 1: a thread-storage failure is 503 AND logged with its code', async () => {
+    // The live run found guest chat failing with a BARE 503, so a storage
+    // failure must now leave a code -- and no user data -- in the logs.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    repository({ createThread: vi.fn(async () => unavailable()) });
+
+    const response = await post({ message: 'hi' });
+
+    expect(response.status).toBe(503);
+    expect(errorSpy).toHaveBeenCalledWith(
+      'Board AI chat storage failed',
+      expect.objectContaining({ where: 'post:createThread', code: 'unavailable' }),
+    );
+    errorSpy.mockRestore();
+  });
+
   it('6. a supplied threadId is resolved through user + board + thread', async () => {
     const repo = repository();
     await post({ threadId: THREAD_ID, message: 'hi' });
@@ -486,7 +502,7 @@ describe('9-15. provider execution is the existing authority', () => {
     expect(userId).toBe(USER_ID);
     expect(mocks.createAIRolePreferenceRepository).toHaveBeenCalled();
     expect(mocks.createAIProviderCredentialRepository).toHaveBeenCalled();
-    expect(Object.keys(deps as object).sort()).toEqual(['allowByok', 'credentials', 'preferences']);
+    expect(Object.keys(deps as object).sort()).toEqual(['allowByok', 'credentials', 'isGuest', 'preferences']);
   });
 
   it('14-15. no credential appears in the response or in a persisted message', async () => {

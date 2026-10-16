@@ -20,7 +20,14 @@ describe('PATCH-362 boardPersonFromRow', () => {
       role: 'editor',
       isGuest: true,
       joinedAt: '2026-01-01T00:00:00Z',
+      joinedViaLinkId: null,
     });
+  });
+
+  it('PATCH-380: carries the share link the row joined through, or null', () => {
+    expect(boardPersonFromRow({ user_id: 'u1', joined_via_link_id: 'link-1' }, null).joinedViaLinkId)
+      .toBe('link-1');
+    expect(boardPersonFromRow({ user_id: 'u1' }, null).joinedViaLinkId).toBeNull();
   });
 
   it('prefers full_name, then name, then email, then Guest', () => {
@@ -59,7 +66,7 @@ describe('PATCH-362 boardPersonFromRow', () => {
 
 describe('PATCH-362 sortBoardPeople', () => {
   const person = (userId: string, joinedAt: string | null): BoardPerson => ({
-    userId, name: userId, email: null, role: 'viewer', isGuest: true, joinedAt,
+    userId, name: userId, email: null, role: 'viewer', isGuest: true, joinedAt, joinedViaLinkId: null,
   });
 
   it('sorts oldest first, with a stable userId tiebreak', () => {

@@ -42,6 +42,7 @@ function mount(props: Partial<React.ComponentProps<typeof ImageEditor>> = {}) {
         initialData={props.initialData}
         defaultTab={props.defaultTab}
         boardId={props.boardId}
+        isGuest={props.isGuest}
       />,
     );
   });
@@ -273,6 +274,31 @@ describe('PATCH-218 upload tab', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain('Could not upload the image. Please try again.');
     expect(document.querySelector('[data-ui="image-editor-modal"]')).not.toBeNull();
+  });
+
+  it('PATCH-380: passes isGuest through to the storage helper', async () => {
+    storage.storeUploadedImage.mockResolvedValue({ ok: true, url: 'https://cdn.example/u/photo.png' });
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, isGuest: true });
+    giveFile(chooseInput()!, png());
+
+    await act(async () => { buttonByText('Add Image')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    const call = storage.storeUploadedImage.mock.calls[0][0] as { isGuest?: boolean };
+    expect(call.isGuest).toBe(true);
+  });
+
+  it('PATCH-380: a guest server refusal reaches the user as the editor error', async () => {
+    storage.storeUploadedImage.mockResolvedValue({ ok: false, message: 'Create a free account to upload files.' });
+    const onSave = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, isGuest: true, onSave });
+    giveFile(chooseInput()!, png());
+
+    await act(async () => { buttonByText('Add Image')!.click(); });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain('Create a free account to upload files.');
   });
 
   it('a missing boardId shows a message and does not save', async () => {

@@ -171,6 +171,64 @@ describe('PATCH-365 CanvasGuestLinksTab', () => {
   });
 });
 
+describe('PATCH-380 CanvasGuestLinksTab: delete-link also removes the people who joined', () => {
+  const peopleResponse = () => jsonResponse({ people: [
+    { userId: 'g1', name: 'Guest', email: null, role: 'editor', isGuest: true, joinedAt: null, joinedViaLinkId: 'l1' },
+    { userId: 'g2', name: 'Guest', email: null, role: 'viewer', isGuest: true, joinedAt: null, joinedViaLinkId: 'l1' },
+    { userId: 'g3', name: 'Other', email: 'o@x.com', role: 'viewer', isGuest: false, joinedAt: null, joinedViaLinkId: null },
+  ] });
+
+  const mockedFetch = (onDelete: (body: unknown) => Response) => vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === 'DELETE') return onDelete(JSON.parse(String(init.body)));
+    if (String(url).endsWith('/collaborators')) return peopleResponse();
+    return jsonResponse({ links: [LINK] });
+  });
+
+  it('shows the count and sends removeJoined: true by default', async () => {
+    const fetchMock = mockedFetch(() => jsonResponse({ removed: 2 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+
+    await click(q('[data-guest-link-off="true"]'));
+    const box = q('[data-remove-joined="true"]') as HTMLInputElement | null;
+    expect(box).not.toBeNull();
+    expect(box!.checked).toBe(true);
+    expect(q('[data-guest-links]')?.textContent).toContain('Also remove the 2 people who joined with this link');
+
+    await click(q('[data-guest-link-off-confirm="true"]'));
+    expect(fetchMock.mock.calls.some(
+      ([url, init]) => String(url).endsWith('/share-links/l1') && (init as RequestInit | undefined)?.method === 'DELETE',
+    )).toBe(true);
+    expect(all('[data-guest-link-row]')).toHaveLength(0);
+  });
+
+  it('unticking the box sends removeJoined: false', async () => {
+    const bodies: unknown[] = [];
+    const fetchMock = mockedFetch((body) => { bodies.push(body); return jsonResponse({ removed: 0 }); });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+
+    await click(q('[data-guest-link-off="true"]'));
+    await click(q('[data-remove-joined="true"]'));
+    await click(q('[data-guest-link-off-confirm="true"]'));
+
+    expect(bodies).toEqual([{ removeJoined: false }]);
+  });
+
+  it('hides the checkbox when nobody joined through the link', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/collaborators')) return jsonResponse({ people: [] });
+      if (init?.method === 'DELETE') return jsonResponse({ removed: 0 });
+      return jsonResponse({ links: [LINK] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+
+    await click(q('[data-guest-link-off="true"]'));
+    expect(q('[data-remove-joined="true"]')).toBeNull();
+  });
+});
+
 describe('PATCH-369 CanvasGuestLinksTab: compact form', () => {
   it('keeps both selects and puts the checkbox and Create on one row', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ links: [] })));

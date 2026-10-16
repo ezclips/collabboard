@@ -37,6 +37,8 @@ describe('PATCH-300 board assistant buttons are freeform-only', () => {
     // still offered on a freeform board -- but it is no longer the whole gate.
     expect(conditionBefore('data-board-ai-chat-open="true"')).toContain('showBoardAiLauncher &&');
     expect(CLIENT).toContain('const showBoardAiLauncher = enableBoardAiChat');
-    expect(CLIENT).toContain('showBoardAssistantButtons || (isPadletBoardAiLayout && !isGuestUser)');
+    // PATCH-380. The five are added, and a guest gets it only when the owner
+    // allowed Board AI for guests.
+    expect(CLIENT).toContain('(isPadletBoardAiLayout && (!isGuestUser || guestAiAllowed))');
   });
 });

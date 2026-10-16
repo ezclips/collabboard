@@ -71,12 +71,15 @@ describe('the storage helper keeps a PDF-area picture off the public gateway', (
   const helper = read('lib/infra/collabboard/imageEditStorage.ts');
   const provenanceAt = helper.indexOf('parseKnowledgePdfAreaProvenance(metadata)');
   const privateReturnAt = helper.indexOf("stored: 'private-file'");
-  const gatewayAt = helper.indexOf('createStorageGateway()');
+  // PATCH-380. The public path now goes through the shared viewer-upload seam
+  // (which itself reaches `createStorageGateway()` for a member).
+  const publicPathAt = helper.indexOf('uploadFileForViewer(');
 
-  it('checks provenance, then returns from the private branch, before the gateway', () => {
+  it('checks provenance, then returns from the private branch, before the public path', () => {
     expect(provenanceAt).toBeGreaterThan(-1);
     expect(privateReturnAt).toBeGreaterThan(provenanceAt);
-    expect(gatewayAt).toBeGreaterThan(privateReturnAt);
+    expect(publicPathAt).toBeGreaterThan(privateReturnAt);
+    expect(read('lib/infra/collabboard/viewerUpload.ts')).toContain('createStorageGateway()');
   });
 
   it('the private branch never names the public bucket', () => {

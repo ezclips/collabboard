@@ -98,6 +98,12 @@ interface ImageEditorProps {
     };
     defaultTab?: 'search' | 'upload';
     editMode?: boolean;
+    /**
+     * PATCH-380. True for an anonymous guest. An uploaded file then goes through
+     * the server upload route (Storage refuses a guest direct write); the editor
+     * shows the server's refusal text if the owner's switch is off.
+     */
+    isGuest?: boolean;
 }
 
 export default function ImageEditor({
@@ -109,6 +115,7 @@ export default function ImageEditor({
     initialData,
     defaultTab = 'search',
     editMode = false,
+    isGuest = false,
 }: ImageEditorProps) {
     const isImportMode = initialData?.source === 'import';
     const isEditMode = (editMode || !!initialData?.imageUrl) && !isImportMode;
@@ -329,7 +336,7 @@ export default function ImageEditor({
             setUploadError(null);
             setUploading(true);
             try {
-                const stored = await storeUploadedImage({ boardId, file: uploadedFile });
+                const stored = await storeUploadedImage({ boardId, file: uploadedFile, isGuest });
                 if (!stored.ok) {
                     setUploadError(stored.message);
                     return;

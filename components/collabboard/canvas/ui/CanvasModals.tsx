@@ -87,6 +87,8 @@ export interface CanvasModalsProps {
   setViewDrawingPadlet: (p: Padlet | null) => void;
   imageEditorTab: string;
   user: AuthUser | null;
+  /** PATCH-380. A guest's Image upload goes through the server route. */
+  isGuest?: boolean;
   // PATCH-370. CanvasClient's ONE comment-author name (guest alias / registered
   // name / never "You"), so every comment written from these editors stores it.
   commentAuthor?: string;
@@ -159,6 +161,7 @@ export default function CanvasModals({
   viewDrawingPadlet, setViewDrawingPadlet,
   imageEditorTab,
   user,
+  isGuest = false,
   commentAuthor,
   canvasLayout, canvasId,
   onImportAsDocument,
@@ -524,6 +527,7 @@ export default function CanvasModals({
           boardId={canvasId}
           defaultTab={imageEditorTab as "search" | "upload" | undefined}
           editMode={!!padletToEdit && padletToEdit.id !== 'new'}
+          isGuest={isGuest}
           initialData={padletToEdit?.type === 'image' ? {
             ...padletToEdit.metadata,
             imageUrl:

@@ -55,7 +55,9 @@ export async function GET(_request: Request, context: { params: Promise<{ id: st
 
   const { data: collaboratorRows, error: collaboratorError } = await admin
     .from('board_collaborators')
-    .select('user_id, role, added_at')
+    // PATCH-380. `joined_via_link_id` tells the owner how many people a link
+    // delete would also remove.
+    .select('user_id, role, added_at, joined_via_link_id')
     .eq('board_id', boardId)
     .order('added_at', { ascending: true })
     .limit(MAX_PEOPLE);

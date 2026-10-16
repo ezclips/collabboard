@@ -25,6 +25,22 @@ export const GUEST_UPLOAD_REFUSAL = {
 } as const;
 
 /**
+ * PATCH-380. The same words the AI refusal has always used. It lives here, not
+ * in `aiCredits.ts`, so the server helper that decides a guest's permission can
+ * return it without importing the credit ledger -- which imports the helper.
+ */
+export const GUEST_AI_REFUSAL_BODY = {
+  error: 'Create a free account to use AI.',
+  code: 'guest_no_ai',
+} as const;
+
+/** PATCH-380. The cap refusal, when a guest has used their allowance. */
+export const GUEST_LIMIT_REFUSAL = {
+  error: 'Guest limit reached. Please try again later.',
+  code: 'guest_limit',
+} as const;
+
+/**
  * PATCH-358 Addendum 1. A session-based auth callback returns this instead of a
  * session to tell its factory the caller is a guest, so the factory can send the
  * 403 itself (the callback only has the user, not a response).

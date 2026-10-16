@@ -6,13 +6,20 @@ interface ColumnContainerCreationPromptProps {
     onClose: () => void;
     onNewContainer: () => void;
     onAddToExisting: () => void;
+    /**
+     * PATCH-380 Addendum 1. False for a guest: a guest may not create a
+     * container (PATCH-379), so "New Container" is hidden and only "Add to
+     * Existing" is offered.
+     */
+    canCreateContainer?: boolean;
 }
 
 export default function ColumnContainerCreationPrompt({
     isOpen,
     onClose,
     onNewContainer,
-    onAddToExisting
+    onAddToExisting,
+    canCreateContainer = true
 }: ColumnContainerCreationPromptProps) {
     if (!isOpen) return null;
 
@@ -20,7 +27,9 @@ export default function ColumnContainerCreationPrompt({
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 pointer-events-auto">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="p-6 border-b flex items-center justify-between">
-                    <h3 className="text-xl font-bold text-gray-800">New Container</h3>
+                    <h3 className="text-xl font-bold text-gray-800">
+                        {canCreateContainer ? 'New Container' : 'Where should this go?'}
+                    </h3>
                     <button
                         onClick={onClose}
                         className="p-1 hover:bg-gray-100 rounded-full transition-colors"
@@ -31,23 +40,26 @@ export default function ColumnContainerCreationPrompt({
 
                 <div className="p-6 space-y-4">
                     <p className="text-gray-500 text-sm">
-                        Create a container to organize your posts.
-                        Choose whether to start a new container or add to one already on the canvas.
+                        {canCreateContainer
+                            ? 'Create a container to organize your posts. Choose whether to start a new container or add to one already on the canvas.'
+                            : 'Add this post to a container already on the canvas.'}
                     </p>
 
                     <div className="grid grid-cols-1 gap-3">
-                        <button
-                            onClick={onNewContainer}
-                            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
-                        >
-                            <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-colors">
-                                <LayoutGrid className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <div className="font-bold text-gray-800">New Container</div>
-                                <div className="text-xs text-gray-500">Create a new container on the wall</div>
-                            </div>
-                        </button>
+                        {canCreateContainer ? (
+                            <button
+                                onClick={onNewContainer}
+                                className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
+                            >
+                                <div className="w-12 h-12 rounded-lg bg-blue-100 flex items-center justify-center text-blue-600 group-hover:bg-blue-200 transition-colors">
+                                    <LayoutGrid className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <div className="font-bold text-gray-800">New Container</div>
+                                    <div className="text-xs text-gray-500">Create a new container on the wall</div>
+                                </div>
+                            </button>
+                        ) : null}
 
                         <button
                             onClick={onAddToExisting}

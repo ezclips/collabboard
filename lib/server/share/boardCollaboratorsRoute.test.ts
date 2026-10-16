@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * here -- the same pattern as shareLinkRedeemRoute.test.ts.
  */
 
-interface CollaboratorRow { user_id: string; role: string | null; added_at: string | null }
+interface CollaboratorRow { user_id: string; role: string | null; added_at: string | null; joined_via_link_id?: string | null }
 interface ProfileRow { id: string; email: string | null; full_name: string | null; name?: string | null }
 
 const state = {
@@ -159,14 +159,26 @@ describe('PATCH-362 GET /boards/[id]/collaborators', () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       people: [
-        { userId: 'u1', name: 'Ada Lovelace', email: 'ada@example.com', role: 'editor', isGuest: false, joinedAt: '2026-01-01T00:00:00Z' },
-        { userId: 'u2', name: 'Guest', email: null, role: 'viewer', isGuest: true, joinedAt: '2026-01-02T00:00:00Z' },
+        { userId: 'u1', name: 'Ada Lovelace', email: 'ada@example.com', role: 'editor', isGuest: false, joinedAt: '2026-01-01T00:00:00Z', joinedViaLinkId: null },
+        { userId: 'u2', name: 'Guest', email: null, role: 'viewer', isGuest: true, joinedAt: '2026-01-02T00:00:00Z', joinedViaLinkId: null },
       ],
     });
     expect(calls.rpc[0]).toEqual({
       name: 'get_board_permission',
       args: { board_uuid: BOARD_ID, user_uuid: USER_ID },
     });
+  });
+
+  it('PATCH-380: returns the link each person joined through', async () => {
+    state.collaborators = [
+      { user_id: 'u1', role: 'editor', added_at: '2026-01-01T00:00:00Z', joined_via_link_id: 'link-1' },
+    ];
+    state.profiles = [{ id: 'u1', email: 'ada@example.com', full_name: 'Ada Lovelace' }];
+
+    const response = await listGet();
+    expect(response.status).toBe(200);
+    const body = await response.json() as { people: Array<{ joinedViaLinkId: string | null }> };
+    expect(body.people[0].joinedViaLinkId).toBe('link-1');
   });
 
   it('returns an empty list when nobody joined', async () => {

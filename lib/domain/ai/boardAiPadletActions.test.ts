@@ -100,4 +100,18 @@ describe('actionsForLayout', () => {
         .toEqual(PADLET_BOARD_AI_ACTIONS.map((action) => action.id));
     }
   });
+
+  it('PATCH-380: answerOnly gives the answers on ANY layout', () => {
+    for (const layout of ['wall', 'columns', 'grid', 'timeline', 'map', null]) {
+      const ids = actionsForLayout(layout, { answerOnly: true }).map((action) => action.id);
+      expect(ids, String(layout)).toEqual(['summarize', 'duplicates', 'open-questions']);
+      expect(actionsForLayout(layout, { answerOnly: true }).every((action) => action.kind === 'answer'))
+        .toBe(true);
+    }
+  });
+
+  it('PATCH-380: answerOnly absent is exactly the old behaviour', () => {
+    expect(actionsForLayout('columns', { answerOnly: false }).length).toBe(7);
+    expect(actionsForLayout('columns', {}).length).toBe(7);
+  });
 });

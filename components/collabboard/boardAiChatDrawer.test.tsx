@@ -501,6 +501,40 @@ describe('46-48. no context is sent, and none is offered', () => {
     expect(code).not.toContain('service_role');
     expect(code).not.toContain('supabase');
   });
+
+  it('PATCH-380: a member sees the "Upload a PDF" control', async () => {
+    await mount();
+    await click('[data-board-ai-context-add="true"]');
+    expect(q('[data-board-ai-context-upload="true"]')).not.toBeNull();
+  });
+
+  it('PATCH-380: a guest does NOT get the "Upload a PDF" control', async () => {
+    await mount({ isGuest: true });
+    await click('[data-board-ai-context-add="true"]');
+    // The Context menu still opens; only the PDF upload item is withheld.
+    expect(q('[data-board-ai-context-menu="true"]')).not.toBeNull();
+    expect(q('[data-board-ai-context-upload="true"]')).toBeNull();
+  });
+
+  it('PATCH-380: a guest dropping a PDF on the context strip makes no upload attempt', async () => {
+    await mount({ isGuest: true });
+    const zone = q('[data-board-ai-context-dropzone="true"]')!;
+    const pdf = new File([new Uint8Array([1, 2, 3])], 'x.pdf', { type: 'application/pdf' });
+    const event = new Event('drop', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'dataTransfer', {
+      value: { types: ['Files'], files: [pdf], getData: () => '' },
+    });
+
+    await act(async () => { zone.dispatchEvent(event); });
+    await act(async () => { await Promise.resolve(); });
+
+    // No upload: the knowledge endpoint (a POST) is never reached.
+    expect(fetchMock.mock.calls.some(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'POST',
+    )).toBe(false);
+    // The drop is consumed, so the browser neither opens nor uploads the file.
+    expect(event.defaultPrevented).toBe(true);
+  });
 });
 
 describe('PDF workspace document-scoped mode', () => {

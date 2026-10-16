@@ -28,7 +28,9 @@ import {
   type AiCreditBalance,
   type AiCreditFeature,
 } from '../../domain/billing/plans';
+import { GUEST_AI_REFUSAL_BODY } from '../../domain/auth/guest';
 import { getSupabaseAdmin } from '../../supabase/admin';
+import { guestMay } from '../sharing/guestPermissions';
 import {
   resolveAIModelSourceForRole,
   type AIModelResolutionSource,
@@ -44,7 +46,7 @@ import { resolveBoardPlan, type BoardPlan } from './boardPlan';
 export const GUEST_AI_REFUSAL = {
   kind: 'refused' as const,
   status: 403 as const,
-  body: { error: 'Create a free account to use AI.', code: 'guest_no_ai' },
+  body: GUEST_AI_REFUSAL_BODY,
 };
 
 export type CheckManagedAiCreditsResult =
@@ -57,7 +59,7 @@ export type CheckManagedAiCreditsResult =
   }
   | {
     readonly kind: 'refused';
-    readonly status: 402 | 403;
+    readonly status: 402 | 403 | 429;
     readonly body: { readonly error: string; readonly code: string };
   };
 
@@ -251,7 +253,7 @@ export type ManagedAiCreditDecision =
   }
   | {
     readonly kind: 'refused';
-    readonly status: 402 | 403;
+    readonly status: 402 | 403 | 429;
     readonly body: { readonly error: string; readonly code: string };
   };
 
@@ -307,8 +309,37 @@ export async function checkBoardAiCredits(input: {
   readonly boardChat?: boolean;
   readonly preferences: AIRolePreferenceReader;
   readonly isGuest: boolean;
+  /**
+   * PATCH-380. Whether a guest may pass when the owner switched Board AI on for
+   * guests. FALSE BY DEFAULT, and deliberately so: only
+   * `app/api/boards/[id]/ai/chat/route.ts` (the Board AI CHAT) sets it, so every
+   * other caller of this function -- starter questions, table-from-document,
+   * the wiki compile session -- keeps refusing a guest even with the flag on.
+   */
+  readonly allowGuest?: boolean;
 }): Promise<ManagedAiCreditDecision> {
-  if (input.isGuest) return GUEST_AI_REFUSAL;
+  if (input.isGuest) {
+    // A guest is refused outright unless the caller has explicitly opened the
+    // Board AI chat to them AND the owner's switch and cap allow it.
+    if (input.allowGuest !== true) return GUEST_AI_REFUSAL;
+
+    // PATCH-380. Everything AFTER this is unchanged: the BOARD's plan (the
+    // owner's workspace) is read and charged exactly as it is for a member. A
+    // guest never resolves a BYOK source, so the preference read is skipped and
+    // the managed default is used. A throw propagates -> 503.
+    const allowed = await guestMay({
+      admin: getSupabaseAdmin(),
+      boardId: input.boardId,
+      userId: input.userId,
+      kind: 'ai',
+      now: input.now,
+    });
+    if (!allowed.ok) {
+      return { kind: 'refused', status: allowed.refusal.status, body: allowed.refusal.body };
+    }
+    return decideBoardAiCredits('collabboard-default', input);
+  }
+
   const source = await resolveAIModelSourceForRole(
     input.userId as never,
     input.role,
@@ -350,7 +381,7 @@ export type AiActionCreditDecision =
   | { readonly kind: 'byok' }
   | { readonly kind: 'forbidden' }
   | { readonly kind: 'allowed'; readonly plan: BoardPlan; readonly balance: AiCreditBalance; readonly charge: boolean }
-  | { readonly kind: 'refused'; readonly status: 402 | 403; readonly body: { readonly error: string; readonly code: string } };
+  | { readonly kind: 'refused'; readonly status: 402 | 403 | 429; readonly body: { readonly error: string; readonly code: string } };
 
 export async function checkAiActionCredits(input: {
   readonly boardId?: string | null;
@@ -362,6 +393,11 @@ export async function checkAiActionCredits(input: {
   readonly canReadBoard: (boardId: string) => Promise<boolean>;
   readonly isGuest: boolean;
 }): Promise<AiActionCreditDecision> {
+  // PATCH-358 / PATCH-380. A guest is REFUSED here, always. The board-chat route
+  // is the ONLY AI surface a guest may reach, and it does not come through this
+  // function -- so an AI action route (text-action, table-plan,
+  // transcript-punctuate, the component routes) can never be driven by a guest,
+  // whatever the owner's Board AI switch says.
   if (input.isGuest) return GUEST_AI_REFUSAL;
   const source = await resolveAIModelSourceForRole(
     input.userId as never,

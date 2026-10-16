@@ -104,4 +104,11 @@ describe('PATCH-362 CanvasPeopleTab', () => {
     expect(q('[data-person-error]')?.textContent).toContain('Could not remove this person.');
     expect(all('[data-person-row]')).toHaveLength(2);
   });
+
+  it('PATCH-380: each Remove button names the person it removes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ people: PEOPLE })));
+    await mount();
+    expect(q('[data-remove-person="u1"]')).not.toBeNull();
+    expect(q('[data-remove-person="u2"]')).not.toBeNull();
+  });
 });

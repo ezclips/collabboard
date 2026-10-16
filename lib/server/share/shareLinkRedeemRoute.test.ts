@@ -274,7 +274,13 @@ describe('PATCH-357 redeem: granting the role', () => {
       args: { board_uuid: BOARD_ID, user_uuid: USER_ID },
     });
     expect(calls.upserts).toHaveLength(1);
-    expect(calls.upserts[0]).toEqual({ board_id: BOARD_ID, user_id: USER_ID, role: 'editor' });
+    expect(calls.upserts[0]).toEqual({
+      board_id: BOARD_ID,
+      user_id: USER_ID,
+      role: 'editor',
+      // PATCH-380: the row records which link granted it.
+      joined_via_link_id: 'link-1',
+    });
     expect(calls.upsertOptions[0]).toEqual({ onConflict: 'board_id,user_id' });
     // Access was recorded.
     expect(calls.updates).toHaveLength(1);
@@ -321,6 +327,20 @@ describe('PATCH-357 redeem: granting the role', () => {
     await post({ token: TOKEN });
     expect(calls.upserts).toHaveLength(1);
     expect(calls.upserts[0].role).toBe('editor');
+  });
+
+  it('PATCH-380: records the link id on insert and on upgrade', async () => {
+    state.link = openLink({ permission: 'edit' });
+    state.permission = null;
+    await post({ token: TOKEN });
+    expect(calls.upserts[0].joined_via_link_id).toBe('link-1');
+
+    calls.upserts.length = 0;
+    state.link = openLink({ id: 'link-2', permission: 'edit' });
+    state.existingCollaborator = { role: 'viewer' };
+    await post({ token: TOKEN });
+    expect(calls.upserts).toHaveLength(1);
+    expect(calls.upserts[0].joined_via_link_id).toBe('link-2');
   });
 
   it('403 for a link whose permission grants no role', async () => {

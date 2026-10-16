@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GUEST_FORBIDDEN_TOOL_TYPES,
   buildCanvasToolbarGroups,
+  guestForbiddenToolTypes,
 } from './canvas/ui/canvasToolbarRegistry';
 
 const DEFAULTS = {
@@ -74,12 +75,22 @@ describe('PATCH-379 the guest toolbar', () => {
   it('offers no SECTION-creating tool: a guest cannot write board_sections', () => {
     // PATCH-379 Addendum 1. `container` is the "Column" tool -- the same grouping
     // a board_sections row is -- so it goes with the rest. The in-layout
-    // "New section" items are hidden by `canAddSection` in RowLane and
+    // "New section" items are hidden by `canManageSections` in RowLane and
     // ColumnsCanvasRow.
     expect(GUEST_FORBIDDEN_TOOL_TYPES.has('container')).toBe(true);
     for (const [name, flags] of ALL_LAYOUTS) {
       expect(typesFor({ ...flags, isGuest: true }), name).not.toContain('container');
     }
+  });
+
+  it('PATCH-380: withholds the Canvas settings tool from a guest', () => {
+    // It writes the board row -- title, wallpaper, layout -- which is the owner's.
+    expect(GUEST_FORBIDDEN_TOOL_TYPES.has('canvas-settings')).toBe(true);
+    for (const [name, flags] of ALL_LAYOUTS) {
+      expect(typesFor({ ...flags, isGuest: true }), name).not.toContain('canvas-settings');
+    }
+    // ...and a non-guest keeps it.
+    expect(typesFor({ isFreeformLayout: true })).toContain('canvas-settings');
   });
 
   it('drops a group that the filter empties, rather than leaving a bare header', () => {
@@ -102,5 +113,30 @@ describe('PATCH-379 the guest toolbar', () => {
     }
     // A sanity check that the filter did not simply return nothing.
     expect(guestTypes.size).toBeGreaterThan(8);
+  });
+});
+
+describe('PATCH-380 the owner switches change the guest toolbar', () => {
+  it('gives Image back only when uploads are allowed', () => {
+    const off = typesFor({ isFreeformLayout: true, isGuest: true });
+    expect(off).not.toContain('image');
+
+    const on = typesFor({ isFreeformLayout: true, isGuest: true, guestUploadsAllowed: true });
+    expect(on).toContain('image');
+  });
+
+  it('gives back nothing else with uploads allowed', () => {
+    const on = new Set(typesFor({ isFreeformLayout: true, isGuest: true, guestUploadsAllowed: true }));
+    for (const stillForbidden of ['ai-component', 'upload', 'import', 'knowledge-pdf', 'library', 'container', 'canvas-settings']) {
+      expect(on.has(stillForbidden), stillForbidden).toBe(false);
+    }
+  });
+
+  it('is a pure function of the flags, so the static set is never mutated', () => {
+    const before = new Set(GUEST_FORBIDDEN_TOOL_TYPES);
+    guestForbiddenToolTypes({ guestUploadsAllowed: true });
+    expect([...GUEST_FORBIDDEN_TOOL_TYPES].sort()).toEqual([...before].sort());
+    expect(guestForbiddenToolTypes({}).has('image')).toBe(true);
+    expect(guestForbiddenToolTypes({ guestUploadsAllowed: true }).has('image')).toBe(false);
   });
 });

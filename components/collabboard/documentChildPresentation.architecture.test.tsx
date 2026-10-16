@@ -99,7 +99,10 @@ describe('PATCH 9D: prior patches remain untouched (regression guards)', () => {
 
   it('Image actions (PATCH 9B/9B.1) remain untouched', () => {
     const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
-    expect(src).toContain('createStorageGateway()');
+    // PATCH-380. The upload destination moved into the shared viewer-upload seam;
+    // the seam reaches Storage for a member (its own test pins that).
+    expect(src).toContain('uploadFileForViewer(');
+    expect(read('lib/infra/collabboard/viewerUpload.ts')).toContain('createStorageGateway()');
     expect(src).toContain('padlet.metadata?.imageUrl || padlet.file_url || (padlet.metadata as any)?.fileUrl');
   });
 

@@ -156,10 +156,19 @@ export async function POST(request: NextRequest) {
     }
     const existingRole = (existing as { role?: string | null } | null)?.role ?? null;
     if (shouldUpgradeCollaborator(existingRole, collaboratorRole)) {
+      // PATCH-380. Record WHICH link granted the row, so the owner can later
+      // delete the link and take these people with it. The upsert only runs when
+      // the row is inserted or upgraded, and it always writes this link's id --
+      // it can never overwrite a non-null value with null.
       const { error: upsertError } = await admin
         .from('board_collaborators')
         .upsert(
-          { board_id: link.board_id, user_id: user.id, role: collaboratorRole },
+          {
+            board_id: link.board_id,
+            user_id: user.id,
+            role: collaboratorRole,
+            joined_via_link_id: String(link.id),
+          },
           { onConflict: 'board_id,user_id' },
         );
       if (upsertError) {

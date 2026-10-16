@@ -44,6 +44,11 @@ import type { UserId } from '../../domain/core/ids';
  */
 export interface BoardAiChatExecutionDeps extends AIModelResolverDeps {
   readonly allowByok: boolean;
+  /**
+   * PATCH-380. True for an anonymous guest. A guest never uses a BYOK key and
+   * never receives the board-change instructions.
+   */
+  readonly isGuest?: boolean;
 }
 
 /**
@@ -175,6 +180,7 @@ export function boardAiChatSystemPrompt(
   kanban = false,
   today?: string,
   padlet = false,
+  guest = false,
 ): string {
   return [
   'You are the CollabBoard Board AI assistant.',
@@ -204,7 +210,11 @@ export function boardAiChatSystemPrompt(
   // PATCH-372. The Padlet-style change instructions ride only on a turn that
   // carries a `padlet-board` block, so every other surface's prompt -- Kanban
   // included -- is unchanged byte for byte.
-  ...(padlet ? PADLET_CHANGE_INSTRUCTIONS : []),
+  //
+  // PATCH-380. NOT FOR A GUEST. A guest may ask about the board and never
+  // restructure it, so the instructions that teach the `<board-changes>` block
+  // are withheld -- and the route drops any block that arrives anyway.
+  ...(padlet && !guest ? PADLET_CHANGE_INSTRUCTIONS : []),
   ].join('\n');
 }
 
@@ -410,7 +420,7 @@ export async function executeBoardAiChat(
       // Conditional, never globally weakened: with the toggle off this is the
       // exact string it has always been, and the Kanban change instructions are
       // present only on a turn that carries a `kanban-board` block.
-      system: boardAiChatSystemPrompt(searchState, kanban, undefined, padlet),
+      system: boardAiChatSystemPrompt(searchState, kanban, undefined, padlet, deps.isGuest === true),
       user: serializeBoardAiChatPayload(boundBoardAiChatHistory(turns), context),
       maxTokens: BOARD_AI_CHAT_MAX_TOKENS,
       temperature: BOARD_AI_CHAT_TEMPERATURE,

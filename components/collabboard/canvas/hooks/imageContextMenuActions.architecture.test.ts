@@ -18,12 +18,20 @@ describe('PATCH 9B: Replace Image reuses the real Supabase Storage upload path (
   const src = read('app/dashboard/canvas/[id]/CanvasClient.tsx');
   const replaceImageBody = extractFunctionBody(src, 'const replaceImage = (id: string) => {', 'const imageExtensionFromMimeType');
 
-  it('uses createStorageGateway + the padlet-files bucket, mirroring addImageToLink -- not openImagePostEditor/base64', () => {
-    expect(replaceImageBody).toContain("createStorageGateway()");
-    expect(replaceImageBody).toContain("storageGateway.upload('padlet-files'");
+  it('uploads through the viewer-upload seam (storage for members), not openImagePostEditor/base64', () => {
+    // PATCH-380. The destination moved into `uploadFileForViewer`, so the body
+    // calls that seam; the seam's own test pins that a member reaches Storage.
+    expect(replaceImageBody).toContain('uploadFileForViewer(');
     expect(replaceImageBody).not.toContain('openImagePostEditor');
     expect(replaceImageBody).not.toContain('readAsDataURL');
     expect(replaceImageBody).not.toContain('FileReader');
+  });
+
+  it('the viewer-upload seam uploads members to the padlet-files bucket via createStorageGateway', () => {
+    const seam = read('lib/infra/collabboard/viewerUpload.ts');
+    expect(seam).toContain('createStorageGateway()');
+    expect(seam).toContain("storageGateway.upload(PADLET_FILES_BUCKET");
+    expect(seam).toContain("'padlet-files'");
   });
 
   it('uses a real <input type=file accept=image/*> file picker', () => {
@@ -38,7 +46,7 @@ describe('PATCH 9B: Replace Image reuses the real Supabase Storage upload path (
 
   it('cancel is safe: returns immediately when no file was chosen, before any upload/persistence call', () => {
     const guardIndex = replaceImageBody.indexOf('if (!file) return;');
-    const uploadIndex = replaceImageBody.indexOf('storageGateway.upload');
+    const uploadIndex = replaceImageBody.indexOf('uploadFileForViewer(');
     expect(guardIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(guardIndex);
   });

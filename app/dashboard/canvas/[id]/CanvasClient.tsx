@@ -92,7 +92,7 @@ import { createSectionsRepository } from '@/lib/infra/canvas/sectionsRepository'
 import type { PadletApplyChangeResult, PadletProposedChange } from '@/lib/domain/ai/padletChangeProposals';
 import { executePadletApplyPlan, planPadletApply } from '@/lib/domain/ai/padletApplyPlan';
 import { getVerifiedAuthUser, onAuthSessionChanged, updateCurrentUserMetadata } from '@/lib/infra/supabase/authState';
-import { createStorageGateway } from '@/lib/infra/supabase/storage';
+import { uploadFileForViewer } from '@/lib/infra/collabboard/viewerUpload';
 import type { Padlet, BoardSection, PendingPostDraft, NewPostDragState, DropIndicatorState, CanvasLine } from '@/types/collabboard';
 import {
   buildKnowledgeSourceNoteDraft,
@@ -603,6 +603,10 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   // PATCH-374. A guest is an anonymous session; the facilitator kit is for the
   // board's host and never for one.
   const isGuestUser = (user as { is_anonymous?: boolean } | null)?.is_anonymous === true;
+  const { hideGuestNames, guestUploadsAllowed, guestAiAllowed } = useBoardGuestSettings(canvasId);
+  // PATCH-380. The owner's two guest switches come from useBoardGuestSettings
+  // (LIVE, on the boards channel), so a guest's toolbar follows a flip without a
+  // reload.
 
   /**
    * PATCH-379. The ONE question the layouts ask before offering Edit / Delete /
@@ -1793,7 +1797,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
    * and never reaches this -- its branch returns before the button's call site.
    */
   const showBoardAiLauncher = enableBoardAiChat
-    && (showBoardAssistantButtons || (isPadletBoardAiLayout && !isGuestUser));
+    && (showBoardAssistantButtons
+      /* PATCH-380. A guest gets Board AI only when the owner allowed it. */
+      || (isPadletBoardAiLayout && (!isGuestUser || guestAiAllowed)));
   // AI/Wiki-document release scope. Deliberately NOT isFreeformLayout: that
   // flag is the catch-all for Table/Stream and any unrecognised layout, none of
   // which add documents. One allowlist (Freeform + Scheduler), shared by the
@@ -6444,6 +6450,14 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     }
   };
 
+  /**
+   * PATCH-380. WHERE A FILE GOES, extracted to `lib/infra/collabboard/viewerUpload.ts`:
+   * a guest's file goes through the server route (Storage is refused to guests),
+   * everyone else keeps the direct `padlet-files` path. The call sites pass the
+   * viewer and the board, and the module throws on failure exactly as the inline
+   * helper did.
+   */
+
   // Link Post specific actions
   const addImageToLink = (id: string) => {
     const padlet = padlets.find(p => p.id === id);
@@ -6458,15 +6472,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       if (!file) return;
 
       try {
-        // Upload image to Supabase storage
+        // Upload image to Supabase storage (PATCH-380: the server route for a guest)
         const fileName = `link-images/${id}-${Date.now()}-${file.name}`;
-        const storageGateway = createStorageGateway();
-        const uploadResult = await storageGateway.upload('padlet-files', fileName, file);
-
-        if (!uploadResult.ok) throw uploadResult.error.cause ?? uploadResult.error;
-
-        // Get public URL
-        const imageUrl = storageGateway.getPublicUrl('padlet-files', fileName);
+        const imageUrl = await uploadFileForViewer({ isGuest: isGuestUser, boardId: canvasId ?? '', file, storagePath: fileName });
 
         // Update padlet metadata with new image
         const newMetadata = {
@@ -6584,12 +6592,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
 
       try {
         const fileName = `image-posts/${id}-${Date.now()}-${file.name}`;
-        const storageGateway = createStorageGateway();
-        const uploadResult = await storageGateway.upload('padlet-files', fileName, file);
-
-        if (!uploadResult.ok) throw uploadResult.error.cause ?? uploadResult.error;
-
-        const imageUrl = storageGateway.getPublicUrl('padlet-files', fileName);
+        // PATCH-380: the server route for a guest, the direct path otherwise.
+        const imageUrl = await uploadFileForViewer({ isGuest: isGuestUser, boardId: canvasId ?? '', file, storagePath: fileName });
         const newMetadata = { ...padlet.metadata, imageUrl };
 
         markPadletLocallyModified(id);
@@ -7361,8 +7365,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
 
   // PATCH-363. Presence: who is on this board right now (all layouts).
   // PATCH-368. The board's guest-name flag, live; it gates the presence payload
-  // (a guest sends name: null) and the rendered alias.
-  const { hideGuestNames } = useBoardGuestSettings(canvasId);
+  // (a guest sends name: null) and the rendered alias. PATCH-380 moved the hook
+  // call to the top of the component, so the guest switches are in scope where
+  // the toolbar is built.
   const boardPresence = useBoardPresence(canvasId ?? null, user ?? null, hideGuestNames);
 
   // PATCH-370. ONE comment-author name for every comment writer in this file and
@@ -9209,6 +9214,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
     isFreeformGraphMode,
     isTimelineLayout,
     isGuest: isGuestUser,
+    guestUploadsAllowed,
     canFacilitate,
     canvasLayout: canvas?.layout ?? null,
     chronoMode,
@@ -9856,6 +9862,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             onDraftContextChange={setBoardAiChatDraftContext}
             autoContextRequests={KANBAN_BOARD_AI_AUTO_CONTEXT}
             onOpenCitation={openBoardAiCitation}
+            /* PATCH-380. A guest cannot attach a PDF: the knowledge route refuses
+               them, so the control would only produce an error. */
+            isGuest={isGuestUser}
             /* Editors only, and only the card action -- no Note, no wiki. */
             canSaveAssistantAsCard={canEditBoardContent}
             onSaveAssistantAsCard={canEditBoardContent ? saveBoardAiAnswerAsCard : undefined}
@@ -10048,6 +10057,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
           setViewDrawingPadlet={setViewDrawingPadlet}
           imageEditorTab={imageEditorTab}
           user={user}
+          isGuest={isGuestUser}
           commentAuthor={commentAuthor}
           canvasLayout={canvas?.layout}
           canvasId={canvasId}
@@ -11905,6 +11915,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                         metadata: drawingPadlet.metadata,
                         variant: 'drawing',
                         dataUrl,
+                        isGuest: isGuestUser,
                       });
                       // The upload can take a while, and authority may have
                       // been revoked in between, so it is asked again before
@@ -12034,6 +12045,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                         metadata: cropPadlet.metadata,
                         variant: 'base',
                         dataUrl: croppedDataUrl,
+                        isGuest: isGuestUser,
                       });
                       // The upload can take a while; ask again before writing.
                       if (!canEditBoardContentRef.current) return;
@@ -12177,6 +12189,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               onAddToExisting={placementPromptMode === 'timeline-horizontal-all'
                 ? handleStartDragToExistingFromHorizontalAll
                 : handleStartDragToExisting}
+              /* PATCH-380 Addendum 1. A guest may not create a container. */
+              canCreateContainer={!isGuestUser}
             />
 
             {/* Container Creation Placement Prompt (Triggered by + Container button) */}
@@ -12188,6 +12202,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               }}
               onNewContainer={handleCreateContainerFromPrompt}
               onAddToExisting={handleDragToExistingFromPrompt}
+              /* PATCH-380 Addendum 1. A guest may not create a container. */
+              canCreateContainer={!isGuestUser}
             />
 
             {/* Wall Layout Placement Prompt */}
@@ -12199,6 +12215,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               }}
               onNewContainer={handleCreateWallContainerWithDraft}
               onAddToExisting={handleWallStartPickExisting}
+              /* PATCH-380 Addendum 1. A guest may not create a container. */
+              canCreateContainer={!isGuestUser}
             />
 
 
@@ -12495,6 +12513,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             canSaveAssistantToWiki={canEditBoardContent}
             onOpenWikiWithProposal={canEditBoardContent ? openBoardWikiWithProposal : undefined}
             selectedBoardItem={boardAiChatSelectedItem}
+            /* PATCH-380. A guest cannot attach a PDF: the knowledge route refuses
+               them, so the control would only produce an error. */
+            isGuest={isGuestUser}
             /* The same reduction the selected item uses, so a dropped post and
                a selected one cannot become two different things. */
             onResolveDroppedPost={boardAiChatItemForPostId}
@@ -12514,6 +12535,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                have them. Freeform and Kanban pass nothing, so the chip row and
                its `/` menu do not exist there. */
             actionLayout={isPadletBoardAiLayout ? canvas?.layout : null}
+            /* PATCH-380. A guest asks questions, never restructures. */
+            actionAnswerOnly={isGuestUser}
           />
         )}
 
@@ -13195,6 +13218,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
         draft={drawingPendingDraft as any}
         onPlaceInNew={handleDrawingNewContainer}
         onPlaceInExisting={handleDrawingAddToExisting}
+        /* PATCH-380 Addendum 1. A guest may not create a container. */
+        canCreateContainer={!isGuestUser}
       />
 
       {/* New Post Ghost Drag Element */}

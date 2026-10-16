@@ -309,6 +309,9 @@ describe('CORRECTION_2: the direct draw and crop callbacks answer to live author
       canEditBoardContentRef: ref,
       canEditBoardContentProbe: () => ref.current,
       supabase: {},
+      // PATCH-380: the arm passes the viewer's guest flag into the store. The
+      // extracted callback names it as a free variable, so it is injected here.
+      isGuestUser: false,
       // PATCH-182: the arm now moves the picture to Storage first. Modelled
       // here so the extracted callback runs with the dependency it really uses.
       storeEditedImage: async (input: unknown) => {

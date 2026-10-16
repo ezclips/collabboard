@@ -222,6 +222,16 @@ export interface BoardAiChatDrawerProps {
    */
   readonly actionLayout?: string | null;
   /**
+   * PATCH-380. A guest gets the ANSWER actions only: they may ask about the
+   * board, never restructure it.
+   */
+  readonly actionAnswerOnly?: boolean;
+  /**
+   * PATCH-380. A guest cannot attach a PDF: PATCH-358 refuses a guest on the
+   * knowledge ingestion route, so the control would only produce an error.
+   */
+  readonly isGuest?: boolean;
+  /**
    * PATCH-197. Whether this viewer may save an answer to the wiki. The SAME
    * capability the wiki drawer gates its Save on; false renders nothing at all,
    * not a disabled button.
@@ -495,6 +505,8 @@ export default function BoardAiChatDrawer({
   canApplyPadletChanges = false,
   boardFrozen = false,
   actionLayout = null,
+  actionAnswerOnly = false,
+  isGuest = false,
   canSaveAssistantToWiki = false,
   onOpenWikiWithProposal,
   sendText,
@@ -1257,7 +1269,17 @@ export default function BoardAiChatDrawer({
     && event.dataTransfer.types.includes(BOARD_AI_POST_CLIP_MIME)
   ), [onResolveDroppedPost]);
 
+  /**
+   * PATCH-380 Addendum 1. Does this drag carry FILES (a PDF, say)? A guest may
+   * not upload a PDF, so a file drop by a guest is ignored outright -- no
+   * upload attempt, no browser navigation.
+   */
+  const dragHasFiles = (event: React.DragEvent) =>
+    (event.dataTransfer?.types ?? []).includes('Files');
+
   const handleContextDragOver = useCallback((event: React.DragEvent) => {
+    // A guest must never be able to start a PDF upload by dropping one.
+    if (isGuest && dragHasFiles(event)) return;
     if (!droppedPostIsSupported(event)) return;
     // Only a transfer we can actually honour is claimed. Without this the
     // browser's default refusal stands, which is the correct answer for a drag
@@ -1265,11 +1287,18 @@ export default function BoardAiChatDrawer({
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     setDropActive(true);
-  }, [droppedPostIsSupported]);
+  }, [droppedPostIsSupported, isGuest]);
 
   const handleContextDragLeave = useCallback(() => setDropActive(false), []);
 
   const handleContextDrop = useCallback((event: React.DragEvent) => {
+    // PATCH-380 Addendum 1. A PDF dropped by a guest is swallowed: consumed here
+    // so the browser neither opens it nor uploads it. No request is made.
+    if (isGuest && dragHasFiles(event)) {
+      event.preventDefault();
+      setDropActive(false);
+      return;
+    }
     if (!droppedPostIsSupported(event)) return;
     event.preventDefault();
     setDropActive(false);
@@ -1284,7 +1313,7 @@ export default function BoardAiChatDrawer({
       return;
     }
     attach(item);
-  }, [attach, droppedPostIsSupported, onResolveDroppedPost]);
+  }, [attach, droppedPostIsSupported, onResolveDroppedPost, isGuest]);
 
   /* ---------------------------------------------------------------- */
   /* Uploading a PDF straight into the conversation                     */
@@ -2303,24 +2332,29 @@ export default function BoardAiChatDrawer({
 
                   It says PDF, because that is what the ingestion pipeline can
                   read. A generic "Upload a file" would promise a Word document
-                  this product cannot open. */}
-              <button
-                type="button"
-                role="menuitem"
-                data-board-ai-context-upload="true"
-                disabled={uploading}
-                className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={() => {
-                  setContextNotice(null);
-                  setContextMenuOpen(false);
-                  fileInputRef.current?.click();
-                }}
-              >
-                <Upload className="h-3 w-3 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 truncate">
-                  {uploading ? 'Uploading…' : 'Upload a PDF…'}
-                </span>
-              </button>
+                  this product cannot open.
+
+                  PATCH-380. HIDDEN FOR A GUEST: the knowledge route refuses a
+                  guest, so showing it would only hand them a button that errors. */}
+              {!isGuest ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  data-board-ai-context-upload="true"
+                  disabled={uploading}
+                  className="flex w-full items-center gap-1.5 rounded px-2 py-1.5 text-left text-[11px] text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={() => {
+                    setContextNotice(null);
+                    setContextMenuOpen(false);
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  <Upload className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="min-w-0 truncate">
+                    {uploading ? 'Uploading…' : 'Upload a PDF…'}
+                  </span>
+                </button>
+              ) : null}
               {/* THE SEARCH TOGGLE. Board scope only -- a PDF conversation is
                   about that PDF, and searching the rest of the board there
                   would answer a question the user did not ask.
@@ -2400,6 +2434,7 @@ export default function BoardAiChatDrawer({
             `/` menu) do not exist without it. */}
         <BoardAiActionChips
           actionLayout={actionLayout}
+          answerOnly={actionAnswerOnly}
           disabled={sending}
           draft={draft}
           onSend={(prompt) => { void send(prompt); }}

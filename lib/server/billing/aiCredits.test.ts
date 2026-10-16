@@ -38,15 +38,31 @@ function makeAdmin(handlers: {
   allowance?: { data: unknown; error: unknown };
   grant?: { data: unknown; error: unknown };
   insertError?: unknown;
+  /** PATCH-380. What `get_board_permission` answers for the guest helper. */
+  permission?: string | null;
+  /** PATCH-380. The owner's `boards.guest_ai_allowed` switch. */
+  guestAiAllowed?: boolean;
+  /** PATCH-380. How many `guest_activity` rows the cap counts. */
+  guestCount?: number;
 } = {}) {
   const inserts: unknown[][] = [];
   const aiFilters: unknown[][] = [];
 
   const from = vi.fn((table: string) => {
+    if (table === 'guest_activity') {
+      const builder = {
+        eq: vi.fn(() => builder),
+        gte: vi.fn(async () => ({ count: handlers.guestCount ?? 0, error: null })),
+      };
+      return { select: vi.fn(() => builder) };
+    }
     if (table === 'boards') {
       const builder = {
         eq: vi.fn(() => builder),
-        maybeSingle: vi.fn(async () => handlers.board ?? { data: { workspace_id: WORKSPACE }, error: null }),
+        maybeSingle: vi.fn(async () => handlers.board ?? {
+          data: { workspace_id: WORKSPACE, guest_ai_allowed: handlers.guestAiAllowed === true },
+          error: null,
+        }),
       };
       return { select: vi.fn(() => builder) };
     }
@@ -100,7 +116,16 @@ function makeAdmin(handlers: {
     throw new Error(`unexpected table: ${table}`);
   });
 
-  return { client: { from } as unknown as SupabaseClient, inserts, aiFilters };
+  return {
+    // PATCH-380. `get_board_permission` for the guest helper; absent by default,
+    // so a guest is refused unless a test says otherwise.
+    client: {
+      from,
+      rpc: vi.fn(async () => ({ data: handlers.permission ?? null, error: null })),
+    } as unknown as SupabaseClient,
+    inserts,
+    aiFilters,
+  };
 }
 
 const proPlan = (period: BoardPlan['subscriptionPeriod']): BoardPlan => ({
@@ -527,8 +552,10 @@ describe('PATCH-358 guests cannot spend AI credits', () => {
     getPreference: vi.fn(async () => ({ ok: true, value: { connectionId: null, modelId: null } }) as never),
   });
 
-  it('checkAiActionCredits refuses a guest and reads nothing at all', async () => {
+  it('checkAiActionCredits refuses a guest even when the owner switch is on', async () => {
     adminMocks.getSupabaseAdmin.mockReset();
+    const { client } = makeAdmin({ permission: 'editor', guestAiAllowed: true, guestCount: 0 });
+    adminMocks.getSupabaseAdmin.mockReturnValue(client);
     const prefs = preferences();
     const read = vi.fn(async () => true);
 
@@ -538,13 +565,16 @@ describe('PATCH-358 guests cannot spend AI credits', () => {
     });
 
     expect(decision).toEqual(guestRefusal);
+    // A guest is refused on the FIRST line: no source, no board read, no admin.
     expect(prefs.getPreference).not.toHaveBeenCalled();
     expect(read).not.toHaveBeenCalled();
     expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
   });
 
-  it('checkBoardAiCredits refuses a guest before the preference reader', async () => {
+  it('checkBoardAiCredits refuses a guest without allowGuest, even with the switch on', async () => {
     adminMocks.getSupabaseAdmin.mockReset();
+    const { client } = makeAdmin({ permission: 'editor', guestAiAllowed: true, guestCount: 0 });
+    adminMocks.getSupabaseAdmin.mockReturnValue(client);
     const prefs = preferences();
 
     const decision = await checkBoardAiCredits({
@@ -554,7 +584,56 @@ describe('PATCH-358 guests cannot spend AI credits', () => {
 
     expect(decision).toEqual(guestRefusal);
     expect(prefs.getPreference).not.toHaveBeenCalled();
-    expect(adminMocks.getSupabaseAdmin).not.toHaveBeenCalled();
+  });
+
+  it('PATCH-380: allowGuest with the owner switch on LIFTS the refusal, on the owner plan', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const { client } = makeAdmin({ permission: 'editor', guestAiAllowed: true, guestCount: 0 });
+    adminMocks.getSupabaseAdmin.mockReturnValue(client);
+    const prefs = preferences();
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: true, allowGuest: true, preferences: prefs,
+    });
+
+    // The guest GATE let them through: the refusal, if any, is about the plan's
+    // credits, never about being a guest. (This board has no subscription in the
+    // harness, so the ledger refuses it -- which is the point.)
+    expect(decision).not.toEqual(guestRefusal);
+    expect(prefs.getPreference).not.toHaveBeenCalled();
+  });
+
+  it('PATCH-380: allowGuest with the owner switch off still refuses', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const { client } = makeAdmin({ permission: 'editor', guestAiAllowed: false });
+    adminMocks.getSupabaseAdmin.mockReturnValue(client);
+    const prefs = preferences();
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: true, allowGuest: true, preferences: prefs,
+    });
+
+    expect(decision).toEqual(guestRefusal);
+  });
+
+  it('PATCH-380: allowGuest at the cap is refused with 429', async () => {
+    adminMocks.getSupabaseAdmin.mockReset();
+    const { client } = makeAdmin({ permission: 'editor', guestAiAllowed: true, guestCount: 20 });
+    adminMocks.getSupabaseAdmin.mockReturnValue(client);
+    const prefs = preferences();
+
+    const decision = await checkBoardAiCredits({
+      boardId: BOARD, userId: USER, role: AI_ROLE_CHAT, cost: 1, now: NOW,
+      isGuest: true, allowGuest: true, preferences: prefs,
+    });
+
+    expect(decision).toEqual({
+      kind: 'refused',
+      status: 429,
+      body: { error: 'Guest limit reached. Please try again later.', code: 'guest_limit' },
+    });
   });
 
   it('checkManagedAiCredits refuses a guest before the plan or the ledger', async () => {

@@ -42,6 +42,10 @@ export default defineConfig({
       'app/api/pexels/**/*.test.ts',
       // PATCH-233: the AI outline route's auth, validation and error mapping.
       'app/api/ai/**/*.test.ts',
+      // PATCH-380: the board routes' tests (the guest-upload route). Without this
+      // line a test file here is silently NOT RUN -- which is worse than a
+      // failing one, because it reports nothing and looks green.
+      'app/api/boards/**/*.test.ts',
       // PATCH-192: the dashboard data loader.
       'lib/dashboard/**/*.test.ts',
       'lib/server/**/*.test.ts',
@@ -108,6 +112,11 @@ export default defineConfig({
       'components/kanban-canvas/**/*.test.tsx',
       'components/ui/*.test.tsx',
       'components/canvas/*.test.tsx',
+      // PATCH-380 Addendum 1: the placement prompts live one level down under
+      // canvas/layouts and canvas/wall; without these lines their tests are
+      // silently NOT RUN (the trap the notes above warn of).
+      'components/canvas/layouts/*.test.tsx',
+      'components/canvas/wall/*.test.tsx',
       'components/map/*.test.tsx',
       'components/graph/*.test.tsx',
       'lib/graph/*.test.ts',

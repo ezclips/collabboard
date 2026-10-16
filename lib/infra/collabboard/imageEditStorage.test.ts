@@ -239,3 +239,70 @@ describe('storeUploadedImage', () => {
     expect(JSON.stringify(result)).not.toContain('data:');
   });
 });
+
+/**
+ * PATCH-380. A guest never writes Storage directly -- both helpers route the
+ * guest through the server upload route, and a server refusal becomes the
+ * editor's message.
+ */
+describe('PATCH-380 guest uploads', () => {
+  const guestUrl = `/api/boards/${base.boardId}/guest-upload`;
+  const okJson = (body: unknown) =>
+    new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+
+  it('storeUploadedImage posts to the server route and never touches the gateway', async () => {
+    fetchMock.mockResolvedValue(okJson({ url: 'https://cdn.example/guest.png' }));
+    const pngFile = new File([new Uint8Array([1, 2, 3])], 'a.png', { type: 'image/png' });
+
+    const result = await storeUploadedImage({ boardId: base.boardId, file: pngFile, isGuest: true });
+
+    expect(result).toEqual({ ok: true, url: 'https://cdn.example/guest.png' });
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(mocks.getPublicUrl).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(guestUrl);
+    expect(init.method).toBe('POST');
+    expect(init.body).toBeInstanceOf(FormData);
+  });
+
+  it('storeUploadedImage surfaces the server refusal text to the editor', async () => {
+    fetchMock.mockResolvedValue(new Response(
+      JSON.stringify({ error: 'Create a free account to upload files.', code: 'guest_no_upload' }),
+      { status: 403, headers: { 'content-type': 'application/json' } },
+    ));
+    const pngFile = new File([new Uint8Array([1, 2, 3])], 'a.png', { type: 'image/png' });
+
+    const result = await storeUploadedImage({ boardId: base.boardId, file: pngFile, isGuest: true });
+
+    expect(result).toEqual({ ok: false, message: 'Create a free account to upload files.' });
+    expect(JSON.stringify(result)).not.toContain('data:');
+  });
+
+  it('a member upload still uses the gateway (isGuest unset)', async () => {
+    const pngFile = new File([new Uint8Array([1, 2, 3])], 'a.png', { type: 'image/png' });
+    const result = await storeUploadedImage({ boardId: base.boardId, file: pngFile });
+    expect(result.ok).toBe(true);
+    expect(mocks.upload).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('storeEditedImage (ordinary post) routes a guest through the server route', async () => {
+    fetchMock.mockResolvedValue(okJson({ url: 'https://cdn.example/guest-edit.png' }));
+
+    const result = await storeEditedImage({ ...base, metadata: { imageUrl: 'https://cdn.example/a.png' }, isGuest: true });
+
+    expect(result).toEqual({ url: 'https://cdn.example/guest-edit.png', stored: 'public-file' });
+    expect(mocks.upload).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe(guestUrl);
+  });
+
+  it('storeEditedImage guest refusal keeps the work inline, never throws', async () => {
+    fetchMock.mockResolvedValue(new Response('nope', { status: 403 }));
+
+    const result = await storeEditedImage({ ...base, metadata: {}, isGuest: true });
+
+    expect(result).toEqual({ url: DATA_URL, stored: 'inline' });
+  });
+});

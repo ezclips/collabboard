@@ -39,6 +39,11 @@ export type CanvasToolbarFlags = {
    */
   isGuest?: boolean;
   /**
+   * PATCH-380. The owner's "Guests may upload images and PDFs" switch. When on,
+   * a guest gets the Image tool back -- it is served by the guest-upload route.
+   */
+  guestUploadsAllowed?: boolean;
+  /**
    * PATCH-374. The facilitator kit (a shared countdown and "Bring everyone
    * here"). The board's HOST -- owner or board admin -- and never a guest; the
    * RPCs refuse anyone else whatever the toolbar renders.
@@ -237,7 +242,26 @@ export const GUEST_FORBIDDEN_TOOL_TYPES: ReadonlySet<string> = new Set([
   'knowledge-pdf',
   'library',
   'container',
+  // PATCH-380. A guest does not get the Canvas settings tool: it writes the
+  // board row (title, wallpaper, layout), which is the owner's.
+  'canvas-settings',
 ]);
+
+/**
+ * PATCH-380. What a guest is forbidden, given the owner's switches.
+ *
+ * `guestUploadsAllowed` gives back `image` and nothing else -- that is the one
+ * tool the server route behind it can serve a guest. `ai-component` stays out
+ * even when AI is allowed: Board AI for a guest is answer-only, and a component
+ * the model writes is a board change by another name.
+ */
+export function guestForbiddenToolTypes(flags: {
+  readonly guestUploadsAllowed?: boolean;
+} = {}): ReadonlySet<string> {
+  const forbidden = new Set(GUEST_FORBIDDEN_TOOL_TYPES);
+  if (flags.guestUploadsAllowed === true) forbidden.delete('image');
+  return forbidden;
+}
 
 export function buildCanvasToolbarGroups({
   isMapLayout,
@@ -245,6 +269,7 @@ export function buildCanvasToolbarGroups({
   isFreeformGraphMode,
   isTimelineLayout,
   isGuest = false,
+  guestUploadsAllowed = false,
   canFacilitate = false,
   canvasLayout = null,
   chronoMode,
@@ -398,10 +423,11 @@ export function buildCanvasToolbarGroups({
   // -- one predicate over every group -- means a group left empty disappears
   // whole, and no tool can be added later without answering this question.
   if (!isGuest) return groups;
+  const guestForbidden = guestForbiddenToolTypes({ guestUploadsAllowed });
   return groups
     .map((group) => ({
       ...group,
-      tools: group.tools.filter((tool) => !GUEST_FORBIDDEN_TOOL_TYPES.has(tool.type)),
+      tools: group.tools.filter((tool) => !guestForbidden.has(tool.type)),
     }))
     .filter((group) => group.tools.length > 0);
 }
