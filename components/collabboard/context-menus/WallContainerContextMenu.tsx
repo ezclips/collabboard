@@ -63,6 +63,17 @@ interface WallContainerContextMenuProps {
         icon?: React.ReactNode;
         className?: string;
     }>;
+    /**
+     * PATCH-379. False for a guest looking at someone else's post: every mutating
+     * item is withheld. Absent means "as before", so no existing caller changes.
+     */
+    canModify?: boolean;
+    /**
+     * PATCH-379. True suppresses the menu ENTIRELY -- the trigger renders its
+     * children bare. A guest on someone else's post would otherwise open a box
+     * with every item withheld, which is worse than no menu at all.
+     */
+    disabled?: boolean;
 }
 
 export function WallContainerContextMenu({
@@ -102,8 +113,41 @@ export function WallContainerContextMenu({
     onSendBackward,
     onSendToBack,
     onAddContainerAt,
-    customActions
+    customActions,
+    canModify = true,
+    disabled = false,
 }: WallContainerContextMenuProps) {
+    /**
+     * PATCH-379. A guest may not change or delete someone else's post. Every item
+     * here renders only when its callback was passed, so the mutating ones are
+     * dropped as if the caller had not passed them -- one gate, and nothing to
+     * keep in step. Opening, copying a link and reporting stay.
+     */
+    if (!canModify) {
+        openTargets = undefined;
+        onOpenTarget = undefined;
+        onChangeColor = undefined;
+        onEdit = undefined;
+        onAddBefore = undefined;
+        onAddAfter = undefined;
+        onDuplicate = undefined;
+        onCopyToAnotherPadlet = undefined;
+        onTransferToAnotherPadlet = undefined;
+        onSetAsPadletCover = undefined;
+        onPin = undefined;
+        onDelete = undefined;
+        onCut = undefined;
+        onPaste = undefined;
+        onRename = undefined;
+        onLock = undefined;
+        onBringToFront = undefined;
+        onBringForward = undefined;
+        onSendBackward = undefined;
+        onSendToBack = undefined;
+        onAddContainerAt = undefined;
+        customActions = undefined;
+    }
+
     const [open, setOpen] = React.useState(false);
     const menuId = React.useId();
 
@@ -161,6 +205,9 @@ export function WallContainerContextMenu({
             {children}
         </div>
     ) : children;
+
+    // PATCH-379. Suppressed entirely rather than opened with nothing in it.
+    if (disabled) return <>{children}</>;
 
     const hasLayerActions = Boolean(onBringToFront || onBringForward || onSendBackward || onSendToBack);
 

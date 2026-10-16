@@ -17,6 +17,7 @@ import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import RowLane from "./RowLane";
 import PostCardContent from "../PostCardContent";
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 // Helper to determine index based on pointer position relative to card center
 function getInsertIndex(pointerX: number, cardRect: DOMRect): 'before' | 'after' {
@@ -26,6 +27,8 @@ function getInsertIndex(pointerX: number, cardRect: DOMRect): 'before' | 'after'
 
 export interface RowCanvasDnDProps {
     isEditable?: boolean;
+    canManageSections?: boolean;
+    canModifyPost?: CanModifyPost;
     sections: BoardSection[];
     padlets: Padlet[];
     allPadlets: Padlet[]; // For passing to RowLane -> PostCardContent
@@ -85,6 +88,8 @@ export interface RowCanvasDnDProps {
 
 export default function RowCanvasDnD({
     isEditable = false,
+    canManageSections = true,
+    canModifyPost = () => true,
     sections,
     padlets,
     allPadlets,
@@ -350,6 +355,8 @@ export default function RowCanvasDnD({
                     >
                         <RowLane
                             isEditable={isEditable}
+                            canManageSections={canManageSections}
+                            canModifyPost={canModifyPost}
                             section={section}
                             posts={postsBySection[section.id] || []}
                             allPadlets={allPadlets}

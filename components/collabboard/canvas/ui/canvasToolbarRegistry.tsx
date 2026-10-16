@@ -211,6 +211,34 @@ export const WORKSPACE_CANVAS_TOOL_TYPES: ReadonlySet<string> = new Set([
   'graph-line',
 ]);
 
+/**
+ * PATCH-379. The tool types a GUEST is not offered.
+ *
+ * These are the ones the SERVER refuses: every AI route rejects a guest
+ * (`GUEST_AI_REFUSAL`) and every upload route rejects one (`GUEST_UPLOAD_REFUSAL`),
+ * with the storage policies refusing the write underneath. Showing them to a
+ * guest offered a button whose only outcome was an error.
+ *
+ * `library` is here with them: the Library panel places library media and
+ * replaces post icons, which is the media family the owner named, and a guest
+ * has no way to remove what it puts on the board.
+ *
+ * PATCH-379 Addendum 1 adds `container`. The Column tool builds the same thing a
+ * `board_sections` row does -- a group the board is then STRUCTURED by -- and a
+ * guest may not write `board_sections` at all. A guest keeps every tool that
+ * makes a POST: Note, Document, To-do, Comment, Table, Section heading, Link,
+ * Draw, Line, and the map tools.
+ */
+export const GUEST_FORBIDDEN_TOOL_TYPES: ReadonlySet<string> = new Set([
+  'ai-component',
+  'image',
+  'upload',
+  'import',
+  'knowledge-pdf',
+  'library',
+  'container',
+]);
+
 export function buildCanvasToolbarGroups({
   isMapLayout,
   isFreeformLayout,
@@ -243,7 +271,7 @@ export function buildCanvasToolbarGroups({
   // are separate pages and come later.
   const showFacilitateTool = canFacilitate && !isGuest && FACILITATION_LAYOUTS.has(canvasLayout ?? '');
 
-  return [
+  const groups: SidebarToolGroup[] = [
     // Group 1 - Canvas-specific (always visible, priority 1); only rendered when
     // there are canvas-specific tools AND the workspace capability is present.
     // Line, Map style and Graph Line do not write `padlets` -- Map style and
@@ -365,4 +393,15 @@ export function buildCanvasToolbarGroups({
       alwaysVisible: true,
     }] : []),
   ];
+
+  // PATCH-379. A guest is not offered a tool the server refuses. Filtering here
+  // -- one predicate over every group -- means a group left empty disappears
+  // whole, and no tool can be added later without answering this question.
+  if (!isGuest) return groups;
+  return groups
+    .map((group) => ({
+      ...group,
+      tools: group.tools.filter((tool) => !GUEST_FORBIDDEN_TOOL_TYPES.has(tool.type)),
+    }))
+    .filter((group) => group.tools.length > 0);
 }

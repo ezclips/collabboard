@@ -39,6 +39,7 @@ import { Padlet } from "@/types/collabboard";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 import { roundPostGeometry } from '@/lib/domain/canvas/postGeometry';
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 // Removed local Padlet interface to use shared type
 
@@ -53,6 +54,7 @@ interface WallCanvasProps {
     new_posts_at_top?: boolean;
   };
   isEditable?: boolean;
+  canModifyPost?: CanModifyPost;
   onPadletUpdate?: (padlet: Padlet) => void;
   onPadletDelete?: (padletId: string) => void;
   onPadletEdit?: (padlet: Padlet) => void;
@@ -77,6 +79,7 @@ interface WallCanvasProps {
 interface SortablePadletProps {
   padlet: Padlet;
   isEditable: boolean;
+  canModifyPost?: CanModifyPost;
   onEdit: (padlet: Padlet) => void;
   onDelete: (id: string) => void;
   // Context Menu Handlers
@@ -110,6 +113,7 @@ interface SortablePadletProps {
 const SortablePadletCard: React.FC<SortablePadletProps> = ({
   padlet,
   isEditable,
+  canModifyPost = () => true,
   onEdit,
   onDelete,
   getChildren,
@@ -174,9 +178,11 @@ const SortablePadletCard: React.FC<SortablePadletProps> = ({
     >
       {isContainer ? (
         <WallContainerContextMenu
+        canModify={canModifyPost(padlet)}
           padlet={padlet}
           onSelect={() => onSelect?.(padlet.id)}
           restrictToMenuTrigger
+          disabled={!canModifyPost(padlet)}
           onEdit={isEditable ? () => onEdit(padlet) : undefined}
           onDelete={isEditable ? () => onDelete(padlet.id) : undefined}
           onDuplicate={isEditable ? () => onDuplicate?.(padlet) : undefined}
@@ -252,6 +258,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
   canvasId,
   canvasSettings = {},
   isEditable = true,
+  canModifyPost = () => true,
   onPadletUpdate,
   onPadletDelete,
   onPadletEdit,
@@ -732,6 +739,7 @@ const WallCanvas: React.FC<WallCanvasProps> = ({
 
                             {slot && (
                               <SortablePadletCard
+                                canModifyPost={canModifyPost}
                                 padlet={slot.padlet}
                                 isEditable={isEditable}
                                 onEdit={handleEdit}

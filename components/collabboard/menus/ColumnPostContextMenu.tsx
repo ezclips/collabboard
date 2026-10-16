@@ -79,6 +79,11 @@ interface ColumnPostContextMenuProps {
     onAddPostType?: (type: string) => void;
     addPostLabel?: string;
     deleteLabel?: string;
+    /**
+     * PATCH-379. False for a guest looking at someone else's post: every mutating
+     * item is withheld. Absent means "as before", so no existing caller changes.
+     */
+    canModify?: boolean;
 }
 
 export function ColumnPostContextMenu({
@@ -131,7 +136,43 @@ export function ColumnPostContextMenu({
     onAddPostType,
     addPostLabel = 'Add post',
     deleteLabel = 'Delete post',
+    canModify = true,
 }: ColumnPostContextMenuProps) {
+    /**
+     * PATCH-379. A guest may not change or delete someone else's post. Every item
+     * in this menu already renders only when its callback was passed, so the
+     * whole set of MUTATING callbacks is dropped here as if the caller had not
+     * passed them -- one gate instead of one per item, and nothing to keep in
+     * step. Reading, opening, copying a link and reporting all stay: none of them
+     * changes the post.
+     */
+    if (!canModify) {
+        openTargets = undefined;
+        onOpenTarget = undefined;
+        onChangeColor = undefined;
+        onEdit = undefined;
+        onAddBefore = undefined;
+        onAddAfter = undefined;
+        onDuplicate = undefined;
+        onCopyToAnotherPadlet = undefined;
+        onTransferToAnotherPadlet = undefined;
+        onSetAsPadletCover = undefined;
+        onPin = undefined;
+        onDelete = undefined;
+        onCut = undefined;
+        onPaste = undefined;
+        onRename = undefined;
+        onLock = undefined;
+        onBringToFront = undefined;
+        onBringForward = undefined;
+        onSendBackward = undefined;
+        onSendToBack = undefined;
+        onTogglePostTitleVisibility = undefined;
+        onAddContainerAt = undefined;
+        onEditPosition = undefined;
+        onAddPostType = undefined;
+    }
+
     const [uncontrolledOpen, setUncontrolledOpen] = React.useState(false);
     const menuId = React.useId();
     const isControlled = controlledOpen !== undefined;

@@ -9,10 +9,12 @@ import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPost
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import { getPadletMapLocation } from '@/lib/map/geojson';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 import { resolvePadletTitleStyle } from '@/lib/domain/canvas/captionStyle';
 
 type PostPopupProps = {
   post: Padlet;
+  canModifyPost?: CanModifyPost;
   allPadlets: Padlet[];
   canEdit?: boolean;
   onClose: () => void;
@@ -44,6 +46,7 @@ type PostPopupProps = {
 
 export default function PostPopup({
   post,
+  canModifyPost = () => true,
   allPadlets,
   canEdit = false,
   onClose,
@@ -214,11 +217,12 @@ export default function PostPopup({
 
   return (
     <ColumnPostContextMenu
+    canModify={canModifyPost(post)}
       padlet={post}
       onSelect={() => {}}
       onOpenChange={onContextMenuOpenChange}
       restrictToMenuTrigger
-      disabled={!canEdit}
+      disabled={!canEdit || !canModifyPost(post)}
       onEdit={canEdit && onEditContainer ? () => onEditContainer(post) : undefined}
       openTargets={orderedOpenTargets}
       getOpenTargetLabel={getContainerEditTargetLabel}

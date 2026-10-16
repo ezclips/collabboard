@@ -38,6 +38,38 @@ export type GuestNameResult =
   | { readonly ok: false; readonly error: string };
 
 /**
+ * PATCH-379. The ONE question a layout asks before offering Edit / Delete / Move
+ * on a post. Built once, in CanvasClient, from the current user -- so a layout
+ * asks and never learns who the guest is.
+ */
+export type CanModifyPost = (post: { readonly metadata?: unknown } | null | undefined) => boolean;
+
+/**
+ * PATCH-379. May this viewer change or delete THIS post?
+ *
+ * A guest may only change their OWN posts; everyone else answers exactly as
+ * before (the board's own authority decides, not this). Ownership is
+ * `metadata.createdBy` -- the value PATCH-364's database trigger stamps, after
+ * stripping whatever the client sent, so it cannot be forged. A post with no
+ * stamp (an older row, or a service-role insert) belongs to nobody, so a guest
+ * may not touch it.
+ *
+ * This is NOT the question "may they comment or react": a guest may always do
+ * both, on anyone's post, and the database allows it.
+ */
+export function canGuestModifyPost(
+  post: { readonly metadata?: unknown } | null | undefined,
+  user: { readonly id?: string | null; readonly is_anonymous?: boolean } | null | undefined,
+): boolean {
+  if (!isGuestUser(user)) return true;
+  const metadata = post?.metadata;
+  if (!metadata || typeof metadata !== 'object') return false;
+  const createdBy = (metadata as { createdBy?: unknown }).createdBy;
+  const userId = user?.id;
+  return typeof createdBy === 'string' && typeof userId === 'string' && createdBy === userId;
+}
+
+/**
  * Validate and normalise a guest's display name: trim, collapse inner
  * whitespace to single spaces, then require 1-40 characters with no control
  * characters and no angle brackets. The normalised name is what gets stored.

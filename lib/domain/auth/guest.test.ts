@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { GUEST_NAME_MAX, isGuestUser, normalizeGuestName } from './guest';
+import { GUEST_NAME_MAX, canGuestModifyPost, isGuestUser, normalizeGuestName } from './guest';
 
 describe('PATCH-358 isGuestUser', () => {
   it('is true only for is_anonymous === true', () => {
@@ -46,5 +46,50 @@ describe('PATCH-358 normalizeGuestName', () => {
     expect(normalizeGuestName('Ada\u0000Lovelace').ok).toBe(false);
     expect(normalizeGuestName('Ada\u0007Lovelace').ok).toBe(false);
     expect(normalizeGuestName('Ada\u007fLovelace').ok).toBe(false);
+  });
+});
+
+describe('PATCH-379 canGuestModifyPost', () => {
+  const GUEST = { id: 'guest-1', is_anonymous: true };
+  const MEMBER = { id: 'member-1', is_anonymous: false };
+  const ownedBy = (createdBy: unknown) => ({ metadata: { createdBy } });
+
+  it('lets a guest change a post the stamp says is theirs', () => {
+    expect(canGuestModifyPost(ownedBy('guest-1'), GUEST)).toBe(true);
+  });
+
+  it('refuses a guest anyone else post', () => {
+    expect(canGuestModifyPost(ownedBy('member-1'), GUEST)).toBe(false);
+    expect(canGuestModifyPost(ownedBy('another-guest'), GUEST)).toBe(false);
+  });
+
+  it('refuses a guest a post with no stamp at all', () => {
+    expect(canGuestModifyPost({ metadata: {} }, GUEST)).toBe(false);
+    expect(canGuestModifyPost({ metadata: { createdBy: null } }, GUEST)).toBe(false);
+    expect(canGuestModifyPost({ metadata: { createdBy: 42 } }, GUEST)).toBe(false);
+    expect(canGuestModifyPost({ metadata: null }, GUEST)).toBe(false);
+    expect(canGuestModifyPost({}, GUEST)).toBe(false);
+    expect(canGuestModifyPost(null, GUEST)).toBe(false);
+  });
+
+  it('refuses a guest with no id of its own', () => {
+    // No id means the stamp could never have matched.
+    expect(canGuestModifyPost(ownedBy('guest-1'), { is_anonymous: true })).toBe(false);
+  });
+
+  it('leaves everyone who is not a guest exactly as they were', () => {
+    // The board's own authority decides for them -- not this helper.
+    expect(canGuestModifyPost(ownedBy('member-1'), MEMBER)).toBe(true);
+    expect(canGuestModifyPost(ownedBy('someone-else'), MEMBER)).toBe(true);
+    expect(canGuestModifyPost({ metadata: {} }, MEMBER)).toBe(true);
+    expect(canGuestModifyPost(null, MEMBER)).toBe(true);
+    expect(canGuestModifyPost(ownedBy('member-1'), null)).toBe(true);
+    expect(canGuestModifyPost(ownedBy('member-1'), undefined)).toBe(true);
+  });
+
+  it('reads the STAMP, not a client-shaped guess, and never a nested one', () => {
+    // `metadata.createdByGuest` is a separate key; only `createdBy` is the stamp.
+    expect(canGuestModifyPost({ metadata: { createdByGuest: true } }, GUEST)).toBe(false);
+    expect(canGuestModifyPost({ metadata: { createdBy: 'guest-1', createdByGuest: true } }, GUEST)).toBe(true);
   });
 });

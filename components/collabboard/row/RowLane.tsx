@@ -28,6 +28,7 @@ import CardShell, { contrastIconColor } from "@/components/collabboard/shells/Ca
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
 import { getContainerEditTargetLabel } from "@/lib/infra/collabboard/containerEditTargetLabel";
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 const TITLED_POST_TYPES = new Set(["text", "note", "todo", "table", "image", "card"]);
 
@@ -75,6 +76,7 @@ function SortableContainerItem({ id, children, disabled, widthClass, containerId
 
 interface RowLaneProps {
     isEditable?: boolean;
+    canModifyPost?: CanModifyPost;
     section: BoardSection;
     posts: Padlet[]; // Normalized list for this section
     allPadlets: Padlet[]; // For content rendering reference
@@ -84,6 +86,7 @@ interface RowLaneProps {
     onRename: (title: string) => void;
     onDelete: () => void;
     onAddSectionLeft: () => void;
+    canManageSections?: boolean;
     onAddSectionRight: () => void;
     onMoveLeft: () => void;
     onMoveRight: () => void;
@@ -130,6 +133,7 @@ interface RowLaneProps {
 
 export default function RowLane({
     isEditable = false,
+    canModifyPost = () => true,
     section,
     posts,
     allPadlets,
@@ -138,6 +142,7 @@ export default function RowLane({
     onRename,
     onDelete,
     onAddSectionLeft,
+    canManageSections = true,
     onAddSectionRight,
     onMoveLeft,
     onMoveRight,
@@ -306,6 +311,7 @@ export default function RowLane({
                                 </div>
                             </DropdownMenuItem>
 
+                            {canManageSections ? (
                             <DropdownMenuItem onClick={() => setIsEditing(true)} className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
                                 <span>Rename section</span>
                                 <div className="ml-auto pl-5 flex gap-1 items-center">
@@ -314,9 +320,16 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
 
+                            {canManageSections ? (
                             <DropdownMenuSeparator />
+                            ) : null}
 
+                            {/* PATCH-379 Addendum 1. A guest may not write
+                                `board_sections`, so the section-creating items
+                                do not exist for them rather than failing. */}
+                            {canManageSections ? (
                             <DropdownMenuItem onClick={onAddSectionLeft} className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
                                 <span>New section above</span>
                                 <div className="ml-auto pl-5 flex gap-1 items-center">
@@ -325,6 +338,8 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
+                            {canManageSections ? (
                             <DropdownMenuItem onClick={onAddSectionRight} className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
                                 <span>New section below</span>
                                 <div className="ml-auto pl-5 flex gap-1 items-center">
@@ -333,9 +348,13 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
 
+                            {canManageSections ? (
                             <DropdownMenuSeparator />
+                            ) : null}
 
+                            {canManageSections ? (
                             <DropdownMenuItem onClick={onMoveLeft} className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
                                 <span>Move section up</span>
                                 <div className="ml-auto pl-5 flex gap-1 items-center">
@@ -344,6 +363,8 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
+                            {canManageSections ? (
                             <DropdownMenuItem onClick={onMoveRight} className="group text-[13px] leading-none text-slate-700 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-slate-900 cursor-pointer">
                                 <span>Move section down</span>
                                 <div className="ml-auto pl-5 flex gap-1 items-center">
@@ -352,9 +373,13 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
 
+                            {canManageSections ? (
                             <DropdownMenuSeparator />
+                            ) : null}
 
+                            {canManageSections ? (
                             <DropdownMenuItem
                                 onClick={onDelete}
                                 className="group text-[13px] leading-none text-red-600 rounded-[3px] flex items-center h-8 px-2 relative select-none outline-none data-[disabled]:text-slate-300 data-[disabled]:pointer-events-none data-[highlighted]:bg-slate-100 data-[highlighted]:text-red-700 cursor-pointer"
@@ -366,6 +391,7 @@ export default function RowLane({
                                     </div>
                                 </div>
                             </DropdownMenuItem>
+                            ) : null}
                         </DropdownMenuContent>
                     </DropdownMenu>
                     )}
@@ -432,12 +458,13 @@ export default function RowLane({
                                     <React.Fragment key={post.id}>
                                         {showIndicator && <DropIndicator />}
 
-                                        <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable} containerId={post.id}>
+                                        <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable || !canModifyPost(post)} containerId={post.id}>
                                             <ColumnPostContextMenu
+                                            canModify={canModifyPost(post)}
                                                 padlet={post}
                                                 onSelect={() => { }}
                                                 restrictToMenuTrigger
-                                                disabled={!isEditable}
+                                                disabled={!isEditable || !canModifyPost(post)}
                                                 onOpen={() => onOpenPost?.(post)}
                                                 openTargets={isEditable ? containerChildren : undefined}
                                                 onOpenTarget={isEditable ? onOpenTarget : undefined}
@@ -505,11 +532,13 @@ export default function RowLane({
                             return (
                                 <React.Fragment key={post.id}>
                                     {showIndicator && <DropIndicator />}
-                                    <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable}>
+                                    <SortableContainerItem id={post.id} widthClass={widthClass} disabled={!isEditable || !canModifyPost(post)}>
                                         <ColumnPostContextMenu
+                                        canModify={canModifyPost(post)}
                                             padlet={post}
                                             onSelect={() => { }}
                                             restrictToMenuTrigger
+                                            disabled={!isEditable || !canModifyPost(post)}
                                             onOpen={() => onOpenPost?.(post)}
                                             onOpenInNewTab={() => onOpenInNewTab?.(post)}
                                             onCopyLink={() => onCopyLink?.(post)}

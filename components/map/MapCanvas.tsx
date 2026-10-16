@@ -19,6 +19,7 @@ import MapSidebar from '@/components/map/MapSidebar';
 import { ColumnPostContextMenu } from '@/components/collabboard/menus/ColumnPostContextMenu';
 import { FREEFORM_BOARD_TOOL_ITEMS } from '@/components/collabboard/canvas/ui/FreeformCanvasBoardMenu';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 type CreateMode = 'idle' | 'search' | 'dropPin' | 'compose' | 'reposition';
 
@@ -97,6 +98,7 @@ type MapCanvasProps = {
   lines?: CanvasLine[];
   mapStyle?: string;
   canEditPosts?: boolean;
+  canModifyPost?: CanModifyPost;
   onCreatePostAtLocation: (location: { lng: number; lat: number; label?: string }) => Promise<Padlet | null>;
   onUpdatePostLocation: (postId: string, location: { lng: number; lat: number; label?: string }) => Promise<void>;
   onPinContainerOpen?: (post: Padlet) => void;
@@ -144,6 +146,7 @@ function MapCanvas({
   lines = [],
   mapStyle = 'mapbox://styles/mapbox/streets-v12',
   canEditPosts = false,
+  canModifyPost = () => true,
   onCreatePostAtLocation,
   onUpdatePostLocation,
   onPinContainerOpen,
@@ -796,6 +799,7 @@ function MapCanvas({
                 {isSelected && !isPinMenuActive ? (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 z-30 mb-5 -translate-x-1/2">
                     <PostPopup
+                      canModifyPost={canModifyPost}
                       post={post}
                       allPadlets={posts}
                       canEdit={canEditPosts}
@@ -842,6 +846,7 @@ function MapCanvas({
                   pinButton
                 ) : (
                   <ColumnPostContextMenu
+                  canModify={canModifyPost(post)}
                     padlet={post}
                     onSelect={() => {
                       setSelectedPostId(null);
@@ -849,7 +854,7 @@ function MapCanvas({
                     onOpenChange={(open) => {
                       setActiveMapContextMenuId((prev) => open ? pinMenuId : (prev === pinMenuId ? null : prev));
                     }}
-                    disabled={!canEditPosts}
+                    disabled={!canEditPosts || !canModifyPost(post)}
                     addPostItems={canEditPosts && post.type === 'container' ? FREEFORM_BOARD_TOOL_ITEMS : undefined}
                     onAddPostType={canEditPosts && post.type === 'container' && onAddPostToPinContainer
                       ? ((toolType) => onAddPostToPinContainer(post, toolType))

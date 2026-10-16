@@ -19,6 +19,7 @@ import { resolveContainerChildren, type ContainerOrientation } from "@/lib/domai
 import { resolveReusedLibraryItemId } from "@/lib/infra/collabboard/libraryReuseLink";
 import { containerBadgeColors } from "@/lib/domain/canvas/containerBadgeColors";
 import { resolvePadletTitleStyle } from "@/lib/domain/canvas/captionStyle";
+import type { CanModifyPost } from "@/lib/domain/auth/guest";
 
 const DEFAULT_IGNORE_KINDS = new Set(["columns-container-move"]);
 
@@ -50,6 +51,7 @@ function sanitizeLibraryMetadata(meta?: Record<string, any>) {
 
 type RowColumnContainerCardProps = {
   padlet: Padlet;
+  canModifyPost?: CanModifyPost;
   allPadlets: Padlet[];
   onDropExistingPadlet?: (containerId: string, droppedId: string) => void;
   onDropDraftIntoContainer?: (containerId: string, draftPayload: any) => void;
@@ -98,6 +100,7 @@ type RowColumnContainerCardProps = {
 
 export default function RowColumnContainerCard({
   padlet,
+  canModifyPost = () => true,
   allPadlets,
   onDropExistingPadlet,
   onDropDraftIntoContainer,
@@ -356,7 +359,7 @@ export default function RowColumnContainerCard({
                 )}
               </button>
             )}
-            {onEditContainer && !isControlled && (
+            {onEditContainer && !isControlled && canModifyPost(padlet) && (
               <button
                 onClick={() => onEditContainer(padlet)}
                 className="absolute right-0 p-1 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors"
@@ -761,4 +764,3 @@ export default function RowColumnContainerCard({
     </div>
   );
 }
-

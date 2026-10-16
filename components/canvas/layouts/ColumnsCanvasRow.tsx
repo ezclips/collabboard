@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 import PostCardContent from "@/components/collabboard/PostCardContent";
 import RowColumnContainerCard from "@/components/collabboard/RowColumnContainerCard";
 import { ColumnPostContextMenu } from "@/components/collabboard/menus/ColumnPostContextMenu";
@@ -39,6 +40,7 @@ type ColumnsLayoutProps = {
   section?: BoardSection;
   posts: Padlet[];
   isEditable?: boolean;
+  canModifyPost?: CanModifyPost;
 
   laneDroppableId: string;
   widthClass?: string;
@@ -47,6 +49,7 @@ type ColumnsLayoutProps = {
   onRename: (title: string) => void;
   onDelete: () => void;
   onAddSectionLeft: () => void;
+  canManageSections?: boolean;
   onAddSectionRight: () => void;
   onMoveLeft: () => void;
   onMoveRight: () => void;
@@ -151,12 +154,14 @@ export default function ColumnsCanvasRow({
   section,
   posts,
   isEditable = false,
+  canModifyPost = () => true,
   laneDroppableId,
   widthClass,
   onAddPost,
   onRename,
   onDelete,
   onAddSectionLeft,
+  canManageSections = true,
   onAddSectionRight,
   onMoveLeft,
   onMoveRight,
@@ -282,12 +287,22 @@ export default function ColumnsCanvasRow({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="w-56" align="end">
+            {/* PATCH-379 Addendum 1. A guest may not write `board_sections`. */}
+            {canManageSections ? (
             <DropdownMenuItem onClick={onAddSectionLeft}>
               <MoveLeft size={14} className="mr-2" /> Add section left
             </DropdownMenuItem>
+            ) : null}
+            {canManageSections ? (
             <DropdownMenuItem onClick={onAddSectionRight}>
               <MoveRight size={14} className="mr-2" /> Add section right
             </DropdownMenuItem>
+            ) : null}
+            {/* PATCH-379 Addendum 2. Rename, move and delete all write
+                `board_sections`, which a guest may not do, so none of them
+                exist for a guest rather than failing on click. */}
+            {canManageSections ? (
+            <>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={onMoveLeft}>
               <MoveLeft size={14} className="mr-2" /> Move left
@@ -299,6 +314,8 @@ export default function ColumnsCanvasRow({
             <DropdownMenuItem onClick={onDelete} className="text-red-600">
               <Trash2 size={14} className="mr-2" /> Delete section
             </DropdownMenuItem>
+            </>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -355,10 +372,11 @@ export default function ColumnsCanvasRow({
               }}
             >
               <ColumnPostContextMenu
+              canModify={canModifyPost(post)}
                 padlet={post}
                 onSelect={() => {}}
                 restrictToMenuTrigger
-                disabled={!isEditable}
+                disabled={!isEditable || !canModifyPost(post)}
                 openTargets={isEditable ? openTargets : undefined}
                 onOpenTarget={isEditable ? onEditPost : undefined}
                 getOpenTargetLabel={getContainerEditTargetLabel}
@@ -433,10 +451,11 @@ export default function ColumnsCanvasRow({
           ) : (
             <div data-post-id={post.id} data-post-card-shell="true">
               <ColumnPostContextMenu
+              canModify={canModifyPost(post)}
                 padlet={post}
                 onSelect={() => {}}
                 restrictToMenuTrigger
-                disabled={!isEditable}
+                disabled={!isEditable || !canModifyPost(post)}
                 onOpen={() => onOpenPost?.(post)}
                 onOpenInNewTab={() => onOpenInNewTab?.(post)}
                 onCopyLink={() => onCopyLink?.(post)}

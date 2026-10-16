@@ -197,3 +197,53 @@ describe('ColumnPostContextMenu: Edit post submenu regression (PATCH 9C.1) [matr
     expect(itemLabels(submenu)).toEqual(['Hallo world', 'Hallo World', 'Image']);
   });
 });
+
+// ============================================================================
+// PATCH-379. A guest looking at someone else's post gets no mutating item. The
+// menu already renders an item only when its callback was passed, so the gate
+// drops the callbacks; these pin BOTH halves -- what goes, and what stays.
+// ============================================================================
+describe('PATCH-379 a guest may not change someone else post', () => {
+  const triggersOf = (menu: HTMLElement) =>
+    Array.from(menu.querySelectorAll('[aria-haspopup="menu"]')).map((el) => (el.textContent ?? '').trim());
+
+  it('shows the mutating items when the viewer may modify the post', () => {
+    const menu = openMenu(mountMenu());
+    expect(triggersOf(menu)).toContain('Edit post');
+    expect(itemLabels(menu)).toContain('Delete post');
+  });
+
+  it('withholds every mutating item when they may not', () => {
+    const menu = openMenu(mountMenu({ canModify: false }));
+    expect(triggersOf(menu)).not.toContain('Edit post');
+    expect(triggersOf(menu)).not.toContain('Post titles');
+    expect(itemLabels(menu)).not.toContain('Delete post');
+    expect(itemLabels(menu)).not.toContain('Send to Back');
+    expect(itemLabels(menu)).not.toContain('Bring to Front');
+  });
+
+  it('defaults to the old behaviour, so no existing caller changes', () => {
+    expect(triggersOf(openMenu(mountMenu({ canModify: undefined })))).toContain('Edit post');
+  });
+
+  it('renders an EMPTY menu when every callback it was given is mutating', () => {
+    // Documented, not hidden. This harness passes only mutating callbacks, so a
+    // guest's menu comes out empty rather than wrong. That is why the CALL SITES
+    // (PATCH-379 Addendum 1) also pass `disabled`, which suppresses the popup
+    // entirely -- a guest gets no menu, not an empty one. This layer stays as the
+    // second gate for any caller that only sets `canModify`.
+    const menu = openMenu(mountMenu({ canModify: false }));
+    expect(itemLabels(menu)).toEqual([]);
+    expect(triggersOf(menu)).toEqual([]);
+  });
+
+  it('suppresses the popup entirely when the trigger is disabled', () => {
+    const container = mountMenu({ canModify: false, disabled: true });
+    act(() => {
+      container.querySelector('[data-testid="trigger"]')!.dispatchEvent(
+        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+      );
+    });
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+  });
+});

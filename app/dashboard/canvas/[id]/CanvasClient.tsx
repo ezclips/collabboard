@@ -137,6 +137,7 @@ import FacilitatorMenu from '@/components/collabboard/facilitation/FacilitatorMe
 import { useBoardFacilitation } from '@/components/collabboard/facilitation/useBoardFacilitation';
 import type { SummonTarget } from '@/lib/domain/facilitation/boardTimer';
 import { isPendingApproval, pendingCount } from '@/lib/domain/canvas/postApproval';
+import { canGuestModifyPost } from '@/lib/domain/auth/guest';
 import { commentAuthorName } from '@/lib/domain/presence/guestAlias';
 import {
   placeDurablePdfAreaLibraryImage as placeDurablePdfAreaLibraryImage_,
@@ -602,6 +603,17 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   // PATCH-374. A guest is an anonymous session; the facilitator kit is for the
   // board's host and never for one.
   const isGuestUser = (user as { is_anonymous?: boolean } | null)?.is_anonymous === true;
+
+  /**
+   * PATCH-379. The ONE question the layouts ask before offering Edit / Delete /
+   * Move on a post. Built here, from the current user, so every layout stays
+   * dumb: it asks, and never learns who the guest is. A non-guest always gets
+   * `true` -- the board's own authority decides for them, exactly as before.
+   */
+  const canModifyPost = useCallback(
+    (post: { readonly metadata?: unknown } | null | undefined) => canGuestModifyPost(post, user),
+    [user],
+  );
 
   /**
    * May this user change the shared CONTENT of this board -- its padlets?
@@ -10773,6 +10785,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             {isColumnsLayout && (
               <ColumnsLayout
                 isEditable={canEditBoardContent}
+                canModifyPost={canModifyPost}
+                canManageSections={!isGuestUser}
                 columns={columnsLayoutData}
                 widthClass="w-[280px]"
                 onAddPost={handleAddPostToSection}
@@ -10867,6 +10881,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   {/* Use Shared Row Canvas DnD Controller */}
                   <RowCanvasDnD
                     isEditable={canEditBoardContent}
+                    canModifyPost={canModifyPost}
+                    canManageSections={!isGuestUser}
                     sections={sortedSections}
                     padlets={padlets}
                     allPadlets={padlets}
@@ -10944,6 +10960,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             {/* Wall Layout - CSS Grid with auto-fit for responsive columns */}
             {isWallLayout && (
               <WallCanvas
+                canModifyPost={canModifyPost}
                 padlets={wallOrderedPadlets}
                 allPadlets={padlets} // Pass complete dataset for child lookups
                 canvasId={canvas?.id ?? ''}
@@ -11101,6 +11118,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                   />
                 )}
                 <ChronoTimelineCanvas
+                  canModifyPost={canModifyPost}
                   padlets={padlets}
                   canvasId={canvasId || ''}
                   chronoMode={chronoMode}
@@ -11224,6 +11242,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             {isMapLayout && (
               <div className="absolute inset-0 pointer-events-auto z-10 bg-white">
                 <MapCanvas
+                  canModifyPost={canModifyPost}
                   posts={padlets}
                   lines={passiveMapLines}
                   mapStyle={currentMapStyleId}
@@ -12262,6 +12281,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
                             className="w-full bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden"
                           >
                             <RowColumnContainerCard
+                              canModifyPost={canModifyPost}
                               padlet={padlet}
                               allPadlets={padlets}
                               onDropDraftIntoContainer={handleDropDraftIntoContainer}

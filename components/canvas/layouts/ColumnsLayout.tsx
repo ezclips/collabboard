@@ -19,6 +19,7 @@ import PostCardContent from "@/components/collabboard/PostCardContent";
 import PostPreviewCard from "@/components/collabboard/PostPreviewCard";
 import { BoardSection, Padlet, DropIndicatorState } from "@/types/collabboard";
 import type { CommentAccessMode } from "@/lib/domain/canvas/comments";
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 type SectionWithPosts = {
     section: BoardSection;
@@ -28,6 +29,8 @@ type SectionWithPosts = {
 interface ColumnsLayoutProps {
     columns: SectionWithPosts[];
     isEditable?: boolean;
+    canManageSections?: boolean;
+    canModifyPost?: CanModifyPost;
     className?: string;
     widthClass?: string; // Dynamic width class
 
@@ -106,6 +109,8 @@ const isContainerPadlet = (p: Padlet) =>
 export default function ColumnsLayout({
     columns,
     isEditable = false,
+    canManageSections = true,
+    canModifyPost = () => true,
     className,
     widthClass,
 
@@ -431,6 +436,8 @@ export default function ColumnsLayout({
                             >
                                 <ColumnsLane
                                     isEditable={isEditable}
+                                    canManageSections={canManageSections}
+                                    canModifyPost={canModifyPost}
                                     section={section}
                                     posts={posts}
                                     allPadlets={allPadlets}

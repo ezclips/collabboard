@@ -20,6 +20,7 @@ import {
 import { getContainerEditTargetLabel } from '@/lib/infra/collabboard/containerEditTargetLabel';
 import type { Padlet, ChronoMode } from '@/types/collabboard';
 import type { CommentAccessMode } from '@/lib/domain/canvas/comments';
+import type { CanModifyPost } from '@/lib/domain/auth/guest';
 
 interface TimelineCanvasProps {
   padlets: Padlet[];
@@ -27,6 +28,7 @@ interface TimelineCanvasProps {
   chronoMode: ChronoMode;
   backgroundStyle?: React.CSSProperties;
   isEditable?: boolean;
+  canModifyPost?: CanModifyPost;
   onOpenContainer: (container: Padlet) => void;
   onDeleteContainer?: (containerId: string) => void;
   onCreateEmptyContainer?: () => void;
@@ -64,6 +66,7 @@ export default function ChronoTimelineCanvas({
   chronoMode,
   backgroundStyle,
   isEditable = false,
+  canModifyPost = () => true,
   onOpenContainer,
   onDeleteContainer,
   onCreateEmptyContainer,
@@ -433,10 +436,11 @@ export default function ChronoTimelineCanvas({
     // Card content with RowColumnContainerCard and Edit button
     const cardContent = (
       <ColumnPostContextMenu
+      canModify={canModifyPost(container)}
         padlet={container}
         onSelect={() => { }}
         restrictToMenuTrigger
-        disabled={!isEditable}
+        disabled={!isEditable || !canModifyPost(container)}
         openTargets={isEditable ? openTargets : undefined}
         onOpenTarget={isEditable ? onOpenTarget : undefined}
         getOpenTargetLabel={getContainerEditTargetLabel}
