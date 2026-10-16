@@ -4,6 +4,7 @@ import type { LoadedAIContent } from '@/lib/ai/contracts';
 import { serializeAIContentForPersistence } from '@/lib/ai/persistence';
 import type { CaptionStyle } from '@/lib/domain/canvas/captionStyle';
 import { nextZIndex } from '@/components/collabboard/canvas/engine/zIndex';
+import { isPlacementDraftEmpty } from '@/lib/domain/canvas/placementOptions';
 import { useGridPadletSave } from './useGridPadletSave';
 
 export type SaveAIComponentData = {
@@ -440,6 +441,18 @@ export function usePadletSave(params: UsePadletSaveParams) {
     };
     if (!isNewPost) {
       return false;
+    }
+
+    // PATCH-381. On the four Padlet layouts an empty new post is discarded
+    // silently -- it is never carried into a container as an empty card.
+    // Freeform, Kanban, Map, Drawing and Scheduler are unchanged. `true`
+    // means "the save stops here": no prompt, no draft, no row.
+    if (
+      (isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout) &&
+      isPlacementDraftEmpty(draft)
+    ) {
+      closeEditor();
+      return true;
     }
 
     // Drawing layout: all new posts prompt the user to place in a container or freely.

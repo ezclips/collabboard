@@ -472,3 +472,83 @@ describe('PATCH-219 Free images tab', () => {
     expect(document.body.textContent).toContain('Sign in to search images');
   });
 });
+
+// PATCH-381. The backdrop saves (like "Add Image"); Escape on a new post with
+// content asks before discarding.
+describe('PATCH-381 backdrop-save and Escape discard', () => {
+  const BOARD = '11111111-1111-4111-8111-111111111111';
+  const backdrop = () => document.querySelector('[data-ui="image-editor-modal"]') as HTMLElement | null;
+  const chooseInput = () => document.getElementById('file-upload') as HTMLInputElement | null;
+  const buttonByText = (text: string) =>
+    [...document.querySelectorAll('button')].find((b) => b.textContent === text) as HTMLButtonElement | undefined;
+
+  function giveFile(input: HTMLInputElement, file: File) {
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+    act(() => { input.dispatchEvent(new Event('change', { bubbles: true })); });
+  }
+  const png = () => new File([new Uint8Array([1, 2, 3])], 'photo.png', { type: 'image/png' });
+
+  beforeEach(() => {
+    storage.storeUploadedImage.mockReset();
+    storage.storeUploadedImage.mockResolvedValue({ ok: true, url: 'https://cdn.example/u/photo.png' });
+    (URL as unknown as { createObjectURL: () => string }).createObjectURL = vi.fn(() => 'blob:preview');
+    (URL as unknown as { revokeObjectURL: () => void }).revokeObjectURL = vi.fn();
+  });
+
+  it('backdrop click with nothing chosen closes without saving', () => {
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave, onClose });
+    act(() => { backdrop()!.click(); });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('backdrop click with an uploaded image saves it (same as "Add Image")', async () => {
+    const onSave = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave });
+    giveFile(chooseInput()!, png());
+    await act(async () => { backdrop()!.click(); });
+    await act(async () => { await Promise.resolve(); });
+    expect(storage.storeUploadedImage).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls[0][0].imageUrl).toBe('https://cdn.example/u/photo.png');
+  });
+
+  it('a click inside the dialog does not save or close', () => {
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave, onClose });
+    const inner = backdrop()!.querySelector('.relative') as HTMLElement;
+    act(() => { inner.click(); });
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Escape on a new post with an image asks "Discard this post?"', async () => {
+    const onSave = vi.fn();
+    const onClose = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onSave, onClose });
+    giveFile(chooseInput()!, png());
+
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(document.body.textContent).toContain('Discard this post?');
+
+    act(() => { buttonByText('Keep editing')!.click(); });
+    expect(document.body.textContent).not.toContain('Discard this post?');
+    expect(onClose).not.toHaveBeenCalled();
+
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    act(() => { buttonByText('Discard')!.click(); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('Escape on an empty new post closes silently', () => {
+    const onClose = vi.fn();
+    mount({ boardId: BOARD, defaultTab: 'upload' as never, onClose });
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain('Discard this post?');
+  });
+});

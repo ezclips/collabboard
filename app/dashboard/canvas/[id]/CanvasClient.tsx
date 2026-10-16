@@ -44,6 +44,8 @@ import { selectCardModalRoute } from '@/lib/domain/canvas/cardModalRoute';
 import { selectDocumentModalDestination, type DocumentModalDestination } from '@/lib/domain/canvas/documentModalRoute';
 import { decideDocumentSwitch, type QueuedDocumentAction } from '@/lib/domain/canvas/documentSwitchGuard';
 import DiscardChangesDialog from '@/components/collabboard/editors/DiscardChangesDialog';
+import FirstTipBar from '@/components/collabboard/canvas/ui/FirstTipBar';
+import { countRootContainers } from '@/lib/domain/canvas/placementOptions';
 import { resolveWorkspaceForUser } from '@/lib/infra/supabase/workspaceMembers';
 import '@/components/kanban-canvas/kanban-canvas.css';
 import ColumnContainerCreationPrompt from '@/components/canvas/layouts/ColumnContainerCreationPrompt';
@@ -1418,6 +1420,17 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const [placementContext, setPlacementContext] = useState<'columns' | 'wall' | 'timeline-horizontal-all' | 'scheduler' | null>(null);
   const [placementPromptMode, setPlacementPromptMode] = useState<'columns' | 'timeline-horizontal-all' | null>(null);
   const [activeSectionId] = useState<string | null>(null);
+  // PATCH-381. "Discard this post?" confirmation for the placement prompt's ×
+  // close (the draft is only dropped once the person confirms).
+  const [discardPostConfirmOpen, setDiscardPostConfirmOpen] = useState(false);
+  // PATCH-381b. While the first-visit tip bar is shown, the Columns/Grid
+  // onboarding bottom hint is hidden, so the two never overlap.
+  const [firstTipVisible, setFirstTipVisible] = useState(false);
+  const discardPostConfirmActionRef = useRef<(() => void) | null>(null);
+  const requestDiscardPostConfirm = useCallback((onDiscard: () => void) => {
+    discardPostConfirmActionRef.current = onDiscard;
+    setDiscardPostConfirmOpen(true);
+  }, []);
 
   // Global Drop Indicator State
   const [dropIndicator, setDropIndicator] = useState<DropIndicatorState>({
@@ -1781,6 +1794,13 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   const isTimelineLayout = canvas?.layout === 'timeline';
   const isMapLayout = canvas?.layout === 'map';
   const isFreeformLayout = canvas?.layout === 'freeform' || (!isWallLayout && !isColumnsLayout && !isKanbanLayout && !isGanttLayout && !isSchedulerLayout && !isGridLayout && !isDrawingLayout && !isTimelineLayout && !isMapLayout);
+  // PATCH-381. The containers on this board -- the board-scope count the
+  // placement prompts judge "Add to Existing" on. Root containers only, since
+  // a nested container is not a valid "Add to Existing" target.
+  const boardContainerCount = useMemo(
+    () => countRootContainers(padlets),
+    [padlets],
+  );
   const showBoardAssistantButtons = !!canvas && isFreeformLayout;
   // PATCH-371. The Padlet-style layouts that get Board AI (the `padlet-board`
   // auto-context + post-citation scroll). PATCH-375 also gives them the floating
@@ -3805,22 +3825,13 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       setDrawingContainerPromptOpen(true);
     },
     onTimelinePlacementStart: (draft) => {
-      if (chronoMode === 'horizontal-all') {
-        setPendingPostDraft(draft);
-        setPlacementPromptMode('timeline-horizontal-all');
-        setIsPlacementPromptOpen(true);
-        return;
-      }
-
+      // PATCH-381. EVERY chrono mode shows the placement prompt, so an empty
+      // timeline (no containers) is never the dead end the straight-to-drag
+      // step used to be. "New Container" appends a timeline container; "Add to
+      // Existing" runs the same click-a-container drag.
       setPendingPostDraft(draft);
-      setPlacementContext('columns');
-      setNewPostDragState({
-        isActive: true,
-        draft,
-        cursor: { x: 0, y: 0 },
-        grabOffset: { x: 0, y: 0 }
-      });
-      toast.info('Click a container to place your post');
+      setPlacementPromptMode('timeline-horizontal-all');
+      setIsPlacementPromptOpen(true);
     },
     onSchedulerPlacementStart: (draft) => {
       setPendingPostDraft(draft);
@@ -4384,7 +4395,9 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
 
   const handleCreateHorizontalAllTimelineContainerWithDraft = async () => {
     const currentDraft = pendingPostDraftRef.current;
-    if (!currentDraft || !canvasId || chronoMode !== 'horizontal-all') return;
+    // PATCH-381. Any timeline chrono mode may create a container now (the
+    // prompt is shown in every mode), not only horizontal-all.
+    if (!currentDraft || !canvasId || !isTimelineLayout) return;
 
     const existingContainers = getTimelineContainers();
     const insertPosition = existingContainers.reduce((max, container) => (
@@ -4741,7 +4754,8 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
   };
 
   const handleStartDragToExistingFromHorizontalAll = () => {
-    if (!pendingPostDraft || chronoMode !== 'horizontal-all') return;
+    // PATCH-381. Add-to-Existing drag is offered in every timeline chrono mode.
+    if (!pendingPostDraft || !isTimelineLayout) return;
 
     setIsPlacementPromptOpen(false);
     setWallPlacementPromptOpen(false);
@@ -4928,6 +4942,32 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [newPostDragState.isActive, newPostDragState.draft, placementContext]);
+
+  // PATCH-381. While a placement is in progress, the CLICK that follows the
+  // resolving mouseup must not reach the board underneath. Otherwise a click
+  // that lands on a column's "+" (Add Container) button creates an empty
+  // container and orphans the draft (the live PATCH-380 loss). Placement
+  // itself resolves on the window mouseup above, from elementsFromPoint, so
+  // suppressing the click costs nothing. A mousedown records the state that
+  // was live when it began; the click reads it -- so the ordering of React's
+  // state flush between mouseup and click cannot break the guard. The two
+  // listeners are attached once and read state through a ref.
+  const placementActiveRef = useRef(false);
+  useEffect(() => { placementActiveRef.current = newPostDragState.isActive; }, [newPostDragState.isActive]);
+  const suppressClickRef = useRef(false);
+  useEffect(() => {
+    const onMouseDownCapture = () => { suppressClickRef.current = placementActiveRef.current; };
+    const onClickCapture = (e: MouseEvent) => {
+      if (!suppressClickRef.current) return;
+      e.stopPropagation();
+    };
+    document.addEventListener('mousedown', onMouseDownCapture, true);
+    document.addEventListener('click', onClickCapture, true);
+    return () => {
+      document.removeEventListener('mousedown', onMouseDownCapture, true);
+      document.removeEventListener('click', onClickCapture, true);
+    };
+  }, []);
 
   const {
     isDragging,
@@ -10480,7 +10520,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               );
             }
 
-            if (!hintContent) return null;
+            if (!hintContent || firstTipVisible) return null;
 
             return (
               <div className="pointer-events-none fixed left-1/2 bottom-4 -translate-x-1/2 z-[2200]">
@@ -12179,9 +12219,11 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
             <ColumnContainerCreationPrompt
               isOpen={isPlacementPromptOpen}
               onClose={() => {
-                setIsPlacementPromptOpen(false);
-                setPendingPostDraft(null);
-                setPlacementPromptMode(null);
+                requestDiscardPostConfirm(() => {
+                  setIsPlacementPromptOpen(false);
+                  setPendingPostDraft(null);
+                  setPlacementPromptMode(null);
+                });
               }}
               onNewContainer={placementPromptMode === 'timeline-horizontal-all'
                 ? handleCreateHorizontalAllTimelineContainerWithDraft
@@ -12189,8 +12231,7 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               onAddToExisting={placementPromptMode === 'timeline-horizontal-all'
                 ? handleStartDragToExistingFromHorizontalAll
                 : handleStartDragToExisting}
-              /* PATCH-380 Addendum 1. A guest may not create a container. */
-              canCreateContainer={!isGuestUser}
+              containerCount={boardContainerCount}
             />
 
             {/* Container Creation Placement Prompt (Triggered by + Container button) */}
@@ -12204,20 +12245,40 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
               onAddToExisting={handleDragToExistingFromPrompt}
               /* PATCH-380 Addendum 1. A guest may not create a container. */
               canCreateContainer={!isGuestUser}
+              /* PATCH-381. This tool prompt keeps its existing wording. */
+              heading={isGuestUser ? 'Where should this go?' : 'New Container'}
             />
 
             {/* Wall Layout Placement Prompt */}
             <WallPlacementPrompt
               isOpen={wallPlacementPromptOpen}
               onClose={() => {
-                setWallPlacementPromptOpen(false);
-                setWallPendingPostDraft(null);
+                requestDiscardPostConfirm(() => {
+                  setWallPlacementPromptOpen(false);
+                  setWallPendingPostDraft(null);
+                });
               }}
               onNewContainer={handleCreateWallContainerWithDraft}
               onAddToExisting={handleWallStartPickExisting}
-              /* PATCH-380 Addendum 1. A guest may not create a container. */
-              canCreateContainer={!isGuestUser}
+              containerCount={boardContainerCount}
             />
+
+            {/* PATCH-381. Closing a placement prompt with × asks first. */}
+            {discardPostConfirmOpen && (
+              <DiscardChangesDialog
+                layer="above-image-editor"
+                title="Discard this post?"
+                message="If you discard now, this post will not be saved."
+                discardLabel="Discard"
+                onKeepEditing={() => setDiscardPostConfirmOpen(false)}
+                onDiscard={() => {
+                  setDiscardPostConfirmOpen(false);
+                  const action = discardPostConfirmActionRef.current;
+                  discardPostConfirmActionRef.current = null;
+                  action?.();
+                }}
+              />
+            )}
 
 
 
@@ -13224,6 +13285,11 @@ export default function CanvasClient({ canvasId, openPadletId, openCardId }: { c
 
       {/* New Post Ghost Drag Element */}
       <GhostDragElement newPostDragState={newPostDragState} />
+
+      {/* PATCH-381. First-visit tip on the four Padlet layouts only. */}
+      {(isWallLayout || isColumnsLayout || isGridLayout || isTimelineLayout) && (
+        <FirstTipBar onVisibilityChange={setFirstTipVisible} />
+      )}
     </div >
     </KnowledgePdfOpenProvider>
     </KnowledgeSourceReferenceProvider>

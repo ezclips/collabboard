@@ -1,5 +1,6 @@
 import React from 'react';
 import { LayoutGrid, MousePointer2, X } from 'lucide-react';
+import { placementOptions } from '@/lib/domain/canvas/placementOptions';
 
 interface WallPlacementPromptProps {
     isOpen: boolean;
@@ -7,9 +8,13 @@ interface WallPlacementPromptProps {
     onNewContainer: () => void;
     onAddToExisting: () => void;
     /**
-     * PATCH-380 Addendum 1. False for a guest: a guest may not create a
-     * container (PATCH-379), so "New Container" is hidden and only "Add to
-     * Existing" is offered.
+     * PATCH-381. Containers on the board today. With none, "Add to Existing"
+     * is disabled with a hint instead of leading to a dead-end drag.
+     */
+    containerCount?: number;
+    /**
+     * PATCH-380 Addendum 1. False for a guest at a prompt that still writes
+     * `board_sections`; the Wall new-post prompt no longer passes it.
      */
     canCreateContainer?: boolean;
 }
@@ -19,9 +24,13 @@ export default function WallPlacementPrompt({
     onClose,
     onNewContainer,
     onAddToExisting,
+    containerCount = 1,
     canCreateContainer = true
 }: WallPlacementPromptProps) {
     if (!isOpen) return null;
+
+    const options = placementOptions({ containerCount, canCreateContainer });
+    const addDisabled = options.addToExisting === 'disabled';
 
     return (
         <div className="fixed inset-0 z-[2000] flex items-center justify-center bg-black/40 backdrop-blur-sm p-4 pointer-events-auto">
@@ -44,7 +53,7 @@ export default function WallPlacementPrompt({
                     </p>
 
                     <div className="grid grid-cols-1 gap-3">
-                        {canCreateContainer ? (
+                        {options.newContainer !== 'hidden' ? (
                             <button
                                 onClick={onNewContainer}
                                 className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
@@ -59,18 +68,33 @@ export default function WallPlacementPrompt({
                             </button>
                         ) : null}
 
-                        <button
-                            onClick={onAddToExisting}
-                            className="flex items-center gap-4 p-4 rounded-xl border-2 border-gray-100 hover:border-blue-500 hover:bg-blue-50 transition-all group text-left"
-                        >
-                            <div className="w-12 h-12 rounded-lg bg-purple-100 flex items-center justify-center text-purple-600 group-hover:bg-purple-200 transition-colors">
-                                <MousePointer2 className="w-6 h-6" />
-                            </div>
-                            <div>
-                                <div className="font-bold text-gray-800">Add to Existing</div>
-                                <div className="text-xs text-gray-500">Drag and drop into a container on the canvas</div>
-                            </div>
-                        </button>
+                        <div>
+                            <button
+                                onClick={addDisabled ? undefined : onAddToExisting}
+                                aria-disabled={addDisabled || undefined}
+                                title={addDisabled ? options.hint : undefined}
+                                className={`flex items-center gap-4 p-4 rounded-xl border-2 transition-all group text-left w-full ${
+                                    addDisabled
+                                        ? 'border-gray-100 bg-gray-50 opacity-50 cursor-not-allowed'
+                                        : 'border-gray-100 hover:border-blue-500 hover:bg-blue-50'
+                                }`}
+                            >
+                                <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${
+                                    addDisabled
+                                        ? 'bg-gray-100 text-gray-400'
+                                        : 'bg-purple-100 text-purple-600 group-hover:bg-purple-200 transition-colors'
+                                }`}>
+                                    <MousePointer2 className="w-6 h-6" />
+                                </div>
+                                <div>
+                                    <div className="font-bold text-gray-800">Add to Existing</div>
+                                    <div className="text-xs text-gray-500">Drag and drop into a container on the canvas</div>
+                                </div>
+                            </button>
+                            {addDisabled && options.hint ? (
+                                <p data-placement-hint className="mt-2 text-xs text-gray-500">{options.hint}</p>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
             </div>

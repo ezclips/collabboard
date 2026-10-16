@@ -341,6 +341,11 @@ export default function ColumnsCanvasRow({
         className="flex-1 min-h-0 overflow-y-auto pb-0 space-y-4 hide-scrollbar"
         data-column-scroll="true"
       >
+        {sortedPosts.length === 0 && (
+          <div data-empty-hint className="select-none py-6 text-center text-xs text-black/40">
+            Click + or drag a post here
+          </div>
+        )}
         {sortedPosts.map((post) => {
           const isContainer = isContainerPadlet(post);
           const openTargets = isContainer

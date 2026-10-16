@@ -4,6 +4,7 @@ import { ColorPickerContent } from '../ColorPicker';
 import { isDocumentImportable } from '@/lib/imports/documentImport';
 import { storeUploadedImage } from '@/lib/infra/collabboard/imageEditStorage';
 import { UPLOAD_LIMITS, tooLargeMessage } from '@/lib/domain/storage/uploadLimits';
+import DiscardChangesDialog from './DiscardChangesDialog';
 import 'react-image-crop/dist/ReactCrop.css';
 
 interface PexelsPhoto {
@@ -162,6 +163,10 @@ export default function ImageEditor({
     const [uploadError, setUploadError] = useState<string | null>(null);
     const [uploading, setUploading] = useState(false);
     const [isDragging, setIsDragging] = useState(false);
+    // PATCH-381. Escape on a NEW post with a chosen image asks first, rather
+    // than silently discarding the draft. Backdrop click now SAVES (see
+    // handleBackdropClick below), so Escape is the only cancel-with-confirm.
+    const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
     // The blob: URL of the preview, revoked when it is replaced or unmounted.
     const objectUrlRef = useRef<string | null>(null);
 
@@ -367,6 +372,38 @@ export default function ImageEditor({
         onClose();
     };
 
+    /**
+     * PATCH-381. A click on the modal backdrop is the same as "Add Image": with
+     * an image chosen or uploaded it saves (awaiting any in-flight upload, and
+     * staying open with the error on failure); with nothing chosen it closes,
+     * exactly as before.
+     */
+    const handleBackdropClick = () => {
+        if (uploading) return;
+        if (previewUrl) {
+            void handleSave();
+            return;
+        }
+        onClose();
+    };
+
+    /**
+     * PATCH-381. Escape on a NEW post with content asks "Discard this post?".
+     * An empty draft closes silently; an EXISTING image post keeps its current
+     * behaviour (no Escape handler) so an edit is never lost this way.
+     */
+    useEffect(() => {
+        if (!isOpen || isEditMode) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape' || discardConfirmOpen) return;
+            event.preventDefault();
+            if (previewUrl) setDiscardConfirmOpen(true);
+            else onClose();
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [isOpen, isEditMode, discardConfirmOpen, previewUrl, onClose]);
+
 
 
     /**
@@ -408,7 +445,7 @@ export default function ImageEditor({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" data-ui="image-editor-modal" onClick={onClose}>
+        <div className="fixed inset-0 bg-black/50 z-[1000] flex items-center justify-center p-4 backdrop-blur-sm" role="dialog" aria-modal="true" data-ui="image-editor-modal" onClick={handleBackdropClick}>
             <div className="relative w-full max-w-4xl h-[80vh]" onClick={(e) => e.stopPropagation()}>
                 <button onClick={onClose} className="absolute -right-3 -top-3 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-400 shadow-md transition-all hover:text-gray-600">
                     <X className="h-3.5 w-3.5" />
@@ -762,6 +799,18 @@ export default function ImageEditor({
                 </div>
             </div>
             </div>
+            {discardConfirmOpen && (
+                <DiscardChangesDialog
+                    title="Discard this post?"
+                    message="If you discard now, this image will not be added to the board."
+                    discardLabel="Discard"
+                    onKeepEditing={() => setDiscardConfirmOpen(false)}
+                    onDiscard={() => {
+                        setDiscardConfirmOpen(false);
+                        onClose();
+                    }}
+                />
+            )}
         </div>
     );
 }
